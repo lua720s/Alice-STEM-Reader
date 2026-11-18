@@ -2,6 +2,8 @@
 
 このファイルと同じディレクトリを作業ルートにして、README.md、REQUIREMENTS.md、DESIGN.md、ROADMAP.md、MATHPIX_VALIDATION.mdを読む。Claude Desktopではこのディレクトリへのアクセスを付けたセッションで、本ファイルを添付するか本文を渡す。Claude Codeではこのディレクトリを開き、「CLAUDE_TASK.mdに従って実装を開始」と依頼する。
 
+着手前に [AGENTS.md](AGENTS.md) を開き、Markdownの参照と [会話・指示ログ](AI_LOG.md) への全ターンの記録を行う。毎回の回答末尾に、実際に参照したMarkdownのパスを列挙する。委託先にも同じルールを渡す。
+
 ## 今回の作業
 
 1. Gitのルートと作業ツリーを確認し、対象ディレクトリ内で作業する。既存変更があれば差分を保全する。合成サンプルの生成器、期待式・矩形と試験基盤を先に作る。
