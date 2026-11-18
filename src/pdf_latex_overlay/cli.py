@@ -92,12 +92,13 @@ def cmd_recognize(a) -> int:
 def cmd_import_mineru(a) -> int:
     from .detect.mineru import import_mineru
 
-    fs = import_mineru(a.mineru_json, a.input)
+    fs = import_mineru(a.mineru_json, a.input, frame=a.frame)
     if Path(a.out).exists():
         print(f"出力先が既に存在する: {a.out}", file=sys.stderr)
         return ExitCode.SAFETY
     fs.save(a.out)
-    _print({"formulas": len(fs.formulas), "out": a.out, "skipped": fs.meta.get("skipped", [])})
+    _print({"formulas": len(fs.formulas), "out": a.out, "skipped": fs.meta.get("skipped", []),
+            "warnings": fs.meta.get("warnings", [])})
     return 0
 
 
@@ -152,6 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("input", help="MinerU に渡した元PDF（ハッシュとページ寸法の確認用）")
     m.add_argument("mineru_json", help="*_middle.json または *_content_list.json")
     m.add_argument("--out", required=True)
+    m.add_argument("--frame", choices=["auto", "rendered", "unrotated"], default="auto",
+                   help="MinerU の座標の基準ページ（既定 auto: 表示どおり）")
     m.set_defaults(func=cmd_import_mineru)
     return p
 

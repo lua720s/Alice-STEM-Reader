@@ -42,3 +42,24 @@ shasum -a 256 models/unimernet_tiny/unimernet_tiny.pth   # 上表の値と一致
 
 - 認識器の出力は字句ごとに空白が入る。`ocr_latex` には原文を保存し、`latex` には意味を変えない範囲で空白を詰めたものを入れる（`tidy_latex`）。制御語の直後の英字の前、制御空白、`\text{...}` の中の空白は残す。
 - 実教材での精度は未測定。著作物PDFはリポジトリに入れない。
+
+## MinerU 結果の取り込み（段階2b）
+
+`import-mineru` は、利用者が別途実行したMinerUの結果JSONを式JSONに変換する。MinerU本体は導入していない。理由は次の3点。
+- MinerU 4.2.3 は torch、transformers 5、gradio、llama-cpp、VLMモデルを要求し、空き容量（4.2GB）では導入後に停止基準の4GBを下回る。
+- ライセンスが独自の「MinerU Open Source License」で、配布前に確認が要る。
+- 2026-11-18時点で、このMacにMinerUの実行環境も過去の出力も見つからなかった（`~/.mineru` にONNXの配置・OCRモデルだけがある）。
+
+対応形式は、MinerU 4.2.3 と docvortex 0.6 のソースで確認した。
+
+| 形式 | 数式の取り方 | 座標 |
+| --- | --- | --- |
+| MinerU 4 `middle.json`（`"schema": "docvortex.middle"`） | `type: "equation"` のブロック | 0〜1 の正規化 |
+| `content_list.json`（V1） | `type: "equation"`、`text`（`$$` を外す） | 0〜1000 の整数 |
+| 旧 `middle.json`（`pdf_info`） | `interline_equation`・`inline_equation` の span | pt、`page_size` 基準 |
+
+- **MinerU 4 の行内数式には矩形がない**（`equation_inline` の span は `type` と `content` だけ）。個別に埋め込めないので、取り込み時に `inline_no_bbox` として除外記録する。ビューアで枠を描けば、手動で追加・再認識できる。
+- 座標は表示どおりのページ画像（回転後、左上原点）を基準とみなし、回転前の保存座標へ変換する。旧形式は `page_size` で判定する。回転180度のページは回転前後で寸法が同じため判別できず、`rotate180_frame_ambiguous` の警告を残す。`--frame unrotated` で基準を明示できる。
+- 同じページで IoU 0.5 を超えて重なる式は、後のものを `duplicate_of:` として除外する。
+- 合成した3形式のJSONで取り込みを試験した。回転0/90/180/270と非ゼロCropBoxを含め、期待矩形とのIoUは平均0.98超（content_listは整数丸めのため0.9超）で、検出漏れ・誤検出は0件。そのまま埋め込みと検証も通った。
+- **未実施**: 実際のMinerUの出力での照合と、座標基準（特に回転ページ）の実機確認。ページ全体からの独自の数式検出（PDF-Extract-Kit の MFD など）は実装していない。
