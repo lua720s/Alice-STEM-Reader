@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF LaTeX Overlay</title>
+<link rel="stylesheet" href="style.css">
+<!-- 数式プレビュー用（任意）。読み込めなければプレビューなしで動く -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="app.js"></script>
+</head>
+<body>
+<header>
+  <strong id="docname">PDF LaTeX Overlay</strong>
+  <span id="stats" class="muted"></span>
+  <span class="spacer"></span>
+  <label class="toggle"><input type="checkbox" id="drawmode"> 枠を描く（D）</label>
+  <select id="mode" title="埋め込み方式">
+    <option value="invisible">不可視テキスト（既定）</option>
+    <option value="actualtext">ActualText</option>
+  </select>
+  <label class="toggle"><input type="checkbox" id="onlyconfirmed"> 確定済みのみ</label>
+  <button id="export" class="primary">PDFを保存</button>
+</header>
+<main>
+  <section id="pages" aria-label="ページ"></section>
+  <aside id="panel">
+    <div id="empty" class="muted">式の枠をクリックすると、LaTeXの確認・コピー・修正ができます。<br>
+      「枠を描く」をオンにしてページ上をドラッグすると、新しい式を追加できます。</div>
+    <div id="detail" hidden>
+      <div class="row"><b id="fid"></b><span id="fstatus" class="badge"></span><span id="fsource" class="muted"></span></div>
+      <img id="crop" alt="元PDFの切り出し">
+      <div id="preview" class="preview" aria-label="数式プレビュー"></div>
+      <label for="latex">LaTeX（修正可）</label>
+      <textarea id="latex" spellcheck="false" rows="5"></textarea>
+      <div class="row buttons">
+        <button id="copy" class="primary" title="C">コピー</button>
+        <button id="save">修正を保存</button>
+        <button id="confirm">確定</button>
+        <button id="exclude">除外</button>
+      </div>
+      <div class="row buttons">
+        <button id="recognize">この枠を再認識</button>
+        <button id="redraw">枠を引き直す</button>
+        <button id="delete" class="danger">削除</button>
+      </div>
+      <details><summary>OCR原文</summary><pre id="ocr"></pre></details>
+      <p id="reason" class="muted"></p>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </aside>
+</main>
+</body>
+</html>
