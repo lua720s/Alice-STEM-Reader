@@ -1,0 +1,28 @@
+# 設計
+
+## 独立モジュールとインターフェース
+
+Pythonパッケージ `pdf_latex_overlay` とCLIを用意する。公開入口の候補は `process_pdf(input_path, output_path, options) -> RunReport`。CLIは公開入口を呼び、AliceArchiveは将来アダプターから同じ入口を呼ぶ。AliceやAliceArchiveへの依存はプロジェクト側に持たせない。
+
+- `backends/mathpix` はアップロードから取得までを管理。ローカル経路と分け、外部送信は明示選択。
+- `detect` はレンダリングしたページから数式領域を検出。UniMERNet公式のPDF-Extract-Kit MFD例を起点にし、手動矩形と固定検出結果でも後段を試せるようにする。[UniMERNet公式リポジトリ](https://github.com/opendatalab/UniMERNet)
+- `recognize` は切り出し画像をUniMERNetへ渡してLaTeXを取得。MacのCPUで小さい入力から始め、MPSは精度・メモリ・時間を比較して選択する。依存版・モデルID・重みのハッシュとライセンスを記録する。
+- `embed` は確定済み式と領域を受け取り、不可視テキストとActualTextを切り替える。埋め込み層だけを比較できるよう、同じ領域・既知LaTeXを使う。
+- `verify` は成果物を再オープンして検査し、バージョン付きJSONレポートを返す。検出・認識結果にはページ番号（0始まり）、矩形、可用な信頼度、LaTeX、エラー・除外理由を持たせる。未提供の信頼度は欠損として扱う。
+
+矩形の保存座標は回転前のCropBox左上原点、単位pt。レンダリング時の拡大・回転・切り出し原点を含む変換を保持し、逆変換で矩形の四隅を戻す。PDFライターへの変換はアダプター内で行い、回転・非ゼロ原点・クリップの往復テストを持つ。
+
+## 埋め込み比較
+
+| 方式 | 実装 | 評価点 |
+| --- | --- | --- |
+| 不可視テキスト | 元ページに文字描画モード3を追加。領域に合うベースラインと幅を設定し、フォントのUnicode抽出と戻り値を確認。 | 長い式で選択がずれないか、既存テキストと二重になるか。 |
+| ActualText | 数式単位のSpan marked contentに `/ActualText` を設定し、選択可能な不可視テキストを内包する。ライブラリのPDF文字列エンコーダを使う。比較フィクスチャではASCIIの代替文字とLaTeXを変え、置換の採用を判別する。 | ビューアが置換文字を返すか、代替文字が漏れないか、抽出順や既存タグが壊れないか。 |
+
+描画と埋め込みの候補はPyMuPDF、低レベルのコンテンツ編集はpikepdfを候補とする。AliceArchiveに配布・統合する前に依存とモデルのライセンスを確認する。既存文字層と競合する式は、周辺本文への影響を評価できるまで明示的に除外し、同じ式を無条件に追記しない。既存ページのラスタライズは検出用に限る。既存ページの内容を置換する方式は個別の構造保持テストを通してから対象に加える。既定方式はコピーと外観の実測で選ぶ。
+
+[PyMuPDF Shape](https://pymupdf.readthedocs.io/en/latest/shape.html) · [PDF AssociationのActualText技法](https://pdfa.org/techniques-for-accessible-pdf/actualtext-provides-correct-extractable-characters-in-place-of-ocr-errors/UA1_Tpdf-G2_06/)
+
+## 出力と再開
+
+入力は読み取り専用。実行ごとに専用作業領域を確保し、入力ハッシュ、設定ハッシュ、モデル版、ページ状態を記録する。再開はこれらが一致した場合に限る。出力先と同じファイルシステムに仮PDFを書き、全検証の後に上書き不可の原子的な操作で公開する。出力先を同時に要求するジョブは衝突として失敗させる。SIGINT/SIGTERMでは新規ページの処理を止め、実行が所有する未公開の一時ファイルだけを整理し、再開情報を残す。OCR結果はデータとして扱い、LaTeXを実行しない。
