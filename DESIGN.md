@@ -23,6 +23,19 @@ Pythonパッケージ `pdf_latex_overlay` とCLIを用意する。公開入口�
 
 [PyMuPDF Shape](https://pymupdf.readthedocs.io/en/latest/shape.html) · [PDF AssociationのActualText技法](https://pdfa.org/techniques-for-accessible-pdf/actualtext-provides-correct-extractable-characters-in-place-of-ocr-errors/UA1_Tpdf-G2_06/)
 
+### 埋め込み比較の実測（2026-11-18、合成フィクスチャ）
+
+macOS 27.0.1、PyMuPDF 2.1（MuPDF 1.28.6）、pikepdf 10.18.2。ベクター・画像化の両方の合成PDF（回転0/90/180/270、非ゼロCropBoxを含む）で、埋め込み可能な式（ベクター8件、画像化10件）を両方式で埋め込んだ。
+
+| 項目 | 不可視テキスト | ActualText（内側をASCII代替「ALT」に変えた比較用） |
+| --- | --- | --- |
+| 外観（72・150 dpiの全ページ画素差） | 0 | 0 |
+| ページ属性・リンク・注釈・アウトライン・フォーム・構造ツリー | 一致 | 一致 |
+| MuPDF領域抽出 | 全件LaTeXと完全一致 | 全件LaTeX（ActualTextを採用） |
+| PDFKit矩形選択（プレビューと同じ文字選択エンジン） | 全件、正規化後に一致（ベクターのインライン式1件で末尾に改行と空白が付いた）。ページ全文に各式が1回だけ出現 | 全件「ALT」。PDFKitはActualTextを採用しない |
+
+**既定方式は不可視テキスト。** ActualTextを使う場合も内側の文字をLaTeXにするため、PDFKitでの結果は不可視テキストと同じになる。非ASCIIを含むLaTeXは、不可視テキストでは理由付きで除外する（Helvetica・WinAnsiで描くため）。プレビューでの手動のドラッグ選択は未実施。
+
 ## 出力と再開
 
 入力は読み取り専用。実行ごとに専用作業領域を確保し、入力ハッシュ、設定ハッシュ、モデル版、ページ状態を記録する。再開はこれらが一致した場合に限る。出力先と同じファイルシステムに仮PDFを書き、全検証の後に上書き不可の原子的な操作で公開する。出力先を同時に要求するジョブは衝突として失敗させる。SIGINT/SIGTERMでは新規ページの処理を止め、実行が所有する未公開の一時ファイルだけを整理し、再開情報を残す。OCR結果はデータとして扱い、LaTeXを実行しない。
