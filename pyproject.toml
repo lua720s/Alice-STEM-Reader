@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "matplotlib>=3.8", "pillow>=10"]
-# UniMERNet は重みとともにプロジェクト内に導入する（docs/MODELS.md 参照）
+# UniMERNet は重みとともにプロジェクト内に導入する（MODELS.md 参照）
 ml = ["torch>=2.2", "transformers>=4.40", "pillow>=10"]
 
 [project.scripts]

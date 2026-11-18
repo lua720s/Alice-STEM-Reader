@@ -45,6 +45,7 @@ def render_formula_png(latex: str, fontsize: float = 12, dpi: int = 300) -> tupl
     from matplotlib import mathtext
     from matplotlib.font_manager import FontProperties
 
+    matplotlib.rcParams["mathtext.fontset"] = "cm"  # 教科書に近い Computer Modern
     buf = io.BytesIO()
     mathtext.math_to_image(f"${latex}$", buf, prop=FontProperties(size=fontsize), dpi=dpi, format="png")
     png = buf.getvalue()

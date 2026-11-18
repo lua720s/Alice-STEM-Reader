@@ -9,9 +9,11 @@
 *.pth
 *.safetensors
 .DS_Store
+.claude/
 .env
 .env.*
 .pytest_cache/
+.venv-ml/
 .venv/
 __pycache__/
 build/
@@ -19,4 +21,3 @@ dist/
 models/
 outputs/
 runs/
-.claude/

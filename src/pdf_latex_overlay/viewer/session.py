@@ -19,6 +19,7 @@ from .. import safety
 from ..models import Formula, FormulaSet
 from ..pipeline import Options, process_pdf
 from ..recognize import RecognizerUnavailable, crop_png, get_backend
+from ..recognize.unimernet import tidy_latex
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 EDITABLE_STATUS = {"pending", "confirmed", "excluded"}
@@ -144,7 +145,7 @@ class ViewerSession:
                 if not isinstance(latex, str) or len(latex) > 20000:
                     raise SessionError("latex が不正")
                 f.latex = latex
-                f.edited = f.ocr_latex is None or latex != f.ocr_latex
+                f.edited = f.ocr_latex is None or latex not in (f.ocr_latex, tidy_latex(f.ocr_latex))
             if status is not None:
                 if status not in EDITABLE_STATUS:
                     raise SessionError(f"status は {sorted(EDITABLE_STATUS)} のいずれか")
@@ -181,8 +182,8 @@ class ViewerSession:
             if res.latex is None:
                 f.reason = f"recognition_failed: {res.error or 'no output'}"
             else:
-                f.ocr_latex = res.latex
-                f.latex = res.latex
+                f.ocr_latex = getattr(res, "raw", None) or res.latex  # 認識器の原文
+                f.latex = res.latex  # 空白を詰めた版（意味は変えない）
                 f.edited = False
                 f.confidence = res.confidence
                 f.source = getattr(self.backend, "name", "unknown")
