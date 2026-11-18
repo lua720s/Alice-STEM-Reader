@@ -1,0 +1,20 @@
+"""AliceArchive から呼び出す例（Alice 側のコードではなく、呼び出し方の見本）。
+
+AliceArchive は元資料を原本として保持し、派生PDFは再生成できる派生アセットとして扱う
+（Alice/docs/products/ALICE_ARCHIVE.md 9章）。このプロジェクトは Alice に依存しない。
+"""
+
+from pathlib import Path
+
+from pdf_latex_overlay import ExitCode, Options, process_pdf
+
+
+def make_latex_copyable_asset(source_pdf: Path, formulas_json: Path, asset_dir: Path) -> dict:
+    out = asset_dir / f"{source_pdf.stem}.latex-overlay.pdf"
+    report_path = asset_dir / f"{source_pdf.stem}.latex-overlay.report.json"
+    rep = process_pdf(source_pdf, out, formulas_json, Options(report_path=str(report_path)))
+    if rep.exit_code != ExitCode.OK:
+        # 派生PDFは公開されていない。レポートの errors と checks を利用者に表示する
+        return {"status": "failed", "exit_code": rep.exit_code, "errors": rep.errors, "report": str(report_path)}
+    return {"status": "ok", "derived_pdf": str(out), "derived_sha256": rep.output_sha256,
+            "source_sha256": rep.input_sha256, "counts": rep.counts, "report": str(report_path)}
