@@ -102,6 +102,31 @@ def cmd_import_mineru(a) -> int:
     return 0
 
 
+def cmd_mathpix_plan(a) -> int:
+    from .mathpix import plan
+
+    _print(plan(a.fixtures_dir, a.out_dir))
+    return 0
+
+
+def cmd_verify_derived(a) -> int:
+    """外部ツール（Mathpix 等）が作った派生PDFを、原本と比べる（原本ハッシュは記録のみ）。"""
+    from . import pdfcheck
+
+    res = {
+        "original_sha256": __import__("pdf_latex_overlay.safety", fromlist=["x"]).sha256_file(a.original),
+        "page_attributes_equal": pdfcheck.page_attributes(a.original) == pdfcheck.page_attributes(a.derived),
+        "appearance": [],
+    }
+    for dpi in a.dpi or [72]:
+        r = pdfcheck.compare_appearance(a.original, a.derived, dpi=dpi)
+        res["appearance"].append({"dpi": dpi, "identical": r.identical, "diffs": r.page_diffs[:20]})
+    ok = res["page_attributes_equal"] and all(x["identical"] for x in res["appearance"])
+    res["ok"] = ok
+    _print(res)
+    return 0 if ok else ExitCode.VERIFY_FAILED
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pdf-latex-overlay", description="数式をLaTeXとしてコピーできる派生PDFを作る")
     p.add_argument("--version", action="version", version=__version__)
@@ -156,6 +181,16 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--frame", choices=["auto", "rendered", "unrotated"], default="auto",
                    help="MinerU の座標の基準ページ（既定 auto: 表示どおり）")
     m.set_defaults(func=cmd_import_mineru)
+    mp = sub.add_parser("mathpix-plan", help="Mathpix の A/B 検証4ジョブを計画する（送信しない）")
+    mp.add_argument("fixtures_dir")
+    mp.add_argument("--out-dir", default="outputs/mathpix")
+    mp.set_defaults(func=cmd_mathpix_plan)
+
+    vd = sub.add_parser("verify-derived", help="派生PDFの外観・ページ属性を原本と比べる")
+    vd.add_argument("original")
+    vd.add_argument("derived")
+    vd.add_argument("--dpi", type=int, action="append", default=None)
+    vd.set_defaults(func=cmd_verify_derived)
     return p
 
 

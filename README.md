@@ -11,7 +11,7 @@ PDF上で数式を選択し、編集可能な LaTeX としてコピーできる�
 - [モデルと認識の記録（UniMERNet）](MODELS.md)
 - [Claude Desktop / Claude Codeへの実装依頼](CLAUDE_TASK.md)
 
-開発着手可能。Mac上の試作では、合成教材の表示数式4件を自動検出し、UniMERNetで認識してから不可視テキストとして埋め込み、PDFKitで4件とも全文をコピーできた。実装コードはこのリポジトリへの取り込み前。Mathpixも合成教材でLaTeX付きAccessible PDFの取得を確認済み。詳しくは検証記録を参照。
+実装状況（2026-11-18）: 合成フィクスチャ・外観検査（段階0）、埋め込み2方式の比較（2c、既定は不可視テキスト）、検証付きCLI（2d）、ローカルビューア、UniMERNetによる切り出し認識（2a）、MinerU結果の取り込み（2b）、Mathpix検証の計画（1、送信なし）を実装し、合成データで試験済み（72件）。実教材での精度、macOSプレビューでの手動コピー確認、実際のMinerU出力の照合、Mathpixの実ジョブは未実施。Codexの試作とMathpixの実測は [検証記録](MATHPIX_VALIDATION.md) を参照。
 
 ## 使い方（開発版）
 

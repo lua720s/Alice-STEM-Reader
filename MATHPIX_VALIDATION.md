@@ -32,3 +32,13 @@ B5相当、本文10.5pt、300 dpi、画像のみの合成教材2ページを設�
 PDFKitの範囲選択と一時クリップボードで確認。1ページ目は表示数式2件をそれぞれLaTeXとしてコピーできた。2ページ目は2式が一つの `aligned` ブロックになり、上の式の選択で両方が返り、下の式だけでは空だった。設定オフとの比較、ベクター入力、プレビューの手動操作は未実施。
 
 出力ファイル名は `mathpix-stem-accessible-latex.pdf`。
+
+## 検証ワークフローの実装（2026-11-18、送信なし）
+
+`pdf-latex-overlay mathpix-plan outputs/fixtures` は、ベクター・画像化 × `math_latex_layer` false/true の計4ジョブについて、上記の `options_json`、入力SHA-256、`mpx scs convert` のコマンド（PDF API、`--async` なし）、取得後の検査コマンドを出力する。送信はせず、認証情報も読まない（試験でソケット接続を禁止して確認）。
+
+取得したPDFは、次の2つで評価する。
+- `verify-derived 原本 派生`: ページ属性と画素差を比べる。
+- `copycheck 派生 --formulas 期待式.json`: MuPDFとPDFKitのコピー比較表を出す（生文字列と正規化後の両方）。
+
+今回は送信の承認がないため、実ジョブは未実施。実施するときは、個別承認を得てから、計画の `command` を1件ずつ手で実行する。
