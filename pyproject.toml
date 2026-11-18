@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-latex-overlay"
+version = "0.1.0"
+description = "元PDFを変えずに、数式をLaTeXとしてコピーできる派生PDFを作る"
+requires-python = ">=3.11"
+dependencies = [
+  "pymupdf>=1.24",
+  "pikepdf>=8",
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "matplotlib>=3.8", "pillow>=10"]
+# UniMERNet は重みとともにプロジェクト内に導入する（docs/MODELS.md 参照）
+ml = ["torch>=2.2", "transformers>=4.40", "pillow>=10"]
+
+[project.scripts]
+pdf-latex-overlay = "pdf_latex_overlay.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pdf_latex_overlay = ["viewer/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:builtin type .* has no __module__ attribute:DeprecationWarning"]
+markers = [
+  "pdfkit: macOS PDFKit (swift) を使う試験",
+  "model: 実モデル（UniMERNet 等）を使う試験",
+]
