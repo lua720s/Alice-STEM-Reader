@@ -21,9 +21,12 @@
     <strong id="docname">PDF LaTeX Overlay</strong>
     <span id="stats" class="muted"></span>
   </div>
+  <button id="doc-menu" class="icon-btn" aria-label="このPDFのメニュー" title="このPDFのメニュー（名前を変更・移動・削除・OCR）" aria-haspopup="menu" disabled>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+  </button>
   <span class="spacer"></span>
   <span id="autostat" class="status" role="status"></span>
-  <button id="autorun" title="未処理のページの数式を検出して認識する">全ページを認識</button>
+  <button id="autorun" title="いま表示しているページの数式を検出して認識する（PDF全体は、⋯ の「OCRを行う」）">このページを認識</button>
   <select id="mode" title="埋め込み方式" aria-label="埋め込み方式">
     <option value="invisible">不可視テキスト（既定）</option>
     <option value="actualtext">ActualText</option>
@@ -48,6 +51,12 @@
     <div class="sb-head">
       <span class="sb-title">コレクション</span>
       <span class="spacer"></span>
+      <button id="tree-newfolder" class="icon-btn small" title="新しいフォルダ" aria-label="新しいフォルダ">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
+      </button>
+      <button id="tree-select" class="icon-btn small" title="複数選択（⌘/Ctrl＋クリックでも選べる）" aria-label="複数選択" aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
+      </button>
       <button id="tree-collapse" class="icon-btn small" title="すべて閉じる" aria-label="すべて閉じる">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8l5-4 5 4M7 16l5 4 5-4"/></svg>
       </button>
@@ -57,6 +66,17 @@
     </div>
     <div class="sb-search"><input id="tree-filter" type="search" placeholder="PDFを検索（/）" aria-label="PDFを検索" autocomplete="off" spellcheck="false"></div>
     <div id="tree" role="tree" aria-label="PDFの一覧"></div>
+    <div id="selbar" hidden>
+      <span id="selcount"></span>
+      <button id="sel-ocr" class="primary" type="button">OCRを行う</button>
+      <button id="sel-move" type="button">移動</button>
+      <button id="sel-trash" class="danger" type="button">ゴミ箱</button>
+      <button id="sel-clear" type="button">解除</button>
+    </div>
+    <div id="ocrbar" hidden>
+      <div class="ocr-text"><span id="ocrtext"></span><button id="ocr-cancel" type="button">キャンセル</button><button id="ocr-close" type="button" hidden>閉じる</button></div>
+      <div class="ocr-prog"><div id="ocrprog"></div></div>
+    </div>
     <div id="tree-foot" class="sb-foot muted"></div>
   </aside>
   <div id="splitter" role="separator" aria-orientation="vertical" aria-label="コレクションの幅" tabindex="0"></div>
@@ -120,6 +140,22 @@
     </aside>
   </main>
 </div>
+<div id="conn" role="alert" hidden>
+  <span>ビューアに接続できません。ビューアが終了したか、起動し直して接続先が変わった可能性があります。起動し直したときは、表示された新しいURLを開き直してください。</span>
+  <button id="conn-retry" type="button">再接続</button>
+</div>
+<dialog id="dlg" aria-labelledby="dlg-title">
+  <form id="dlg-form" method="dialog">
+    <h2 id="dlg-title"></h2>
+    <p id="dlg-msg" class="muted" hidden></p>
+    <input id="dlg-input" type="text" autocomplete="off" spellcheck="false" hidden>
+    <div id="dlg-list" role="listbox" aria-label="移動先のフォルダ" hidden></div>
+    <div class="dlg-actions">
+      <button type="button" id="dlg-cancel">キャンセル</button>
+      <button type="submit" id="dlg-ok" class="primary">OK</button>
+    </div>
+  </form>
+</dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

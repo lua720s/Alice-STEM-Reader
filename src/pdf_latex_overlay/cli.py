@@ -78,7 +78,7 @@ def cmd_viewer(a) -> int:
     from .viewer.server import serve
 
     return serve(a.paths, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
-                 backend=a.backend, workdir=a.workdir, auto=not a.no_auto)
+                 backend=a.backend, workdir=a.workdir, auto=not a.no_auto, readonly=a.readonly)
 
 
 def cmd_recognize(a) -> int:
@@ -253,6 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--backend", default="none", help="再認識のバックエンド（none / unimernet）")
     v.add_argument("--no-open", action="store_true")
     v.add_argument("--no-auto", action="store_true", help="開いた時点での全ページ自動認識をしない")
+    v.add_argument("--readonly", action="store_true", help="名前の変更・移動・削除・フォルダ作成を受け付けない")
     v.set_defaults(func=cmd_viewer)
 
     r = sub.add_parser("recognize", help="式の矩形を切り出して LaTeX を認識する")

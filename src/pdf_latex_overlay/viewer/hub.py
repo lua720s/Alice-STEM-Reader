@@ -11,17 +11,21 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 import time
 from pathlib import Path
 
 
 from .. import safety
-from ..prepare import entry_dir, hold_lock, library_root, lock_holder, read_meta, write_meta
+from ..prepare import entry_dir, hold_lock, library_root, lock_holder, prepare_one, read_meta, write_meta
+from ..recognize.base import RecognizerUnavailable
+from .fsops import clean_name, move_to_trash
 from .session import SessionError, ViewerSession
 
 MAX_FILES = 20000
@@ -40,7 +44,8 @@ def file_id(path: Path) -> str:
 
 
 class Hub:
-    def __init__(self, roots, backend="none", backend_obj=None, detector=None, library=None, auto_on_open=False):
+    def __init__(self, roots, backend="none", backend_obj=None, detector=None, library=None, auto_on_open=False,
+                 readonly=False, trash_dir=None):
         self.roots = [Path(r).resolve() for r in roots]
         for r in self.roots:
             if not r.exists():
@@ -58,6 +63,13 @@ class Hub:
             self._own_models = True
         self.library = Path(library) if library else None
         self.auto_on_open = auto_on_open
+        self.readonly = readonly  # True なら、名前の変更・移動・削除・フォルダ作成を受け付けない
+        # 試験・確認用。None なら OS のゴミ箱。環境変数 PLO_TRASH_DIR でも指定できる（実際のゴミ箱を使わずに動作を確かめるため）
+        self._trash_dir = trash_dir or os.environ.get("PLO_TRASH_DIR") or None
+        self.folders: dict[str, Path] = {}
+        self._dirs: list[tuple[int, Path]] = []
+        self._ocr: dict | None = None
+        self._ocr_thread: threading.Thread | None = None
         self.lock = threading.RLock()
         self.session: ViewerSession | None = None
         self.current_id: str | None = None
@@ -82,8 +94,9 @@ class Hub:
         return h
 
     # ---------------------------------------------------------------- 走査
-    def _walk(self) -> tuple[list[tuple[int, Path]], bool]:
+    def _walk(self):
         files: list[tuple[int, Path]] = []
+        dirs: list[tuple[int, Path]] = []
         truncated = False
         for ri, root in enumerate(self.roots):
             if root.is_file():
@@ -92,6 +105,7 @@ class Hub:
                 continue
             for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
                 dirnames[:] = sorted((d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS), key=natural_key)
+                dirs.append((ri, Path(dirpath)))  # PDF のない（空の）フォルダも一覧に出す
                 for fn in sorted(filenames, key=natural_key):
                     if fn.startswith(".") or not fn.lower().endswith(".pdf"):
                         continue
@@ -104,15 +118,21 @@ class Hub:
                     files.append((ri, p))
                 if truncated:
                     break
-        return files, truncated
+        return files, dirs, truncated
+
+    def _dir_key(self, ri: int, d: Path) -> str:
+        rel = d.relative_to(self.roots[ri]).parts
+        return f"r{ri}" + ("/" + "/".join(rel) if rel else "")
 
     def scan(self, force: bool = False):
         with self.lock:
             now = time.monotonic()
             if force or self._scan is None or now - self._scan[0] > SCAN_TTL_S:
-                files, trunc = self._walk()
+                files, dirs, trunc = self._walk()
                 self._scan = (now, files, trunc)
+                self._dirs = dirs
                 self.index = {file_id(p): p for _, p in files}
+                self.folders = {self._dir_key(ri, d): d for ri, d in dirs}
             return self._scan[1], self._scan[2]
 
     def id_of(self, path) -> str:
@@ -221,8 +241,29 @@ class Hub:
     def tree(self, refresh: bool = False) -> dict:
         files, truncated = self.scan(force=refresh)
         self._ensure_hashing(files)
-        top: dict[int, dict] = {}
+        nodes: dict[str, dict] = {}
+
+        def folder(ri: int, rel: tuple) -> dict:
+            key = f"r{ri}" + ("/" + "/".join(rel) if rel else "")
+            n = nodes.get(key)
+            if n is None:
+                root = self.roots[ri]
+                n = {"type": "folder", "name": rel[-1] if rel else (root.name or str(root)), "key": key, "children": []}
+                nodes[key] = n
+                if rel:
+                    folder(ri, rel[:-1])["children"].append(n)
+            return n
+
+        for ri, d in self._dirs:
+            folder(ri, d.relative_to(self.roots[ri]).parts)
         loose: list[dict] = []
+        for ri, p in files:
+            root = self.roots[ri]
+            node = self._file_node(p)
+            if root.is_file():
+                loose.append(node)
+            else:
+                folder(ri, p.relative_to(root).parent.parts)["children"].append(node)
 
         def sort_children(n):
             n["children"].sort(key=lambda c: (c["type"] != "folder", natural_key(c["name"])))
@@ -230,31 +271,282 @@ class Hub:
                 if c["type"] == "folder":
                     sort_children(c)
 
-        for ri, p in files:
-            root = self.roots[ri]
-            node = self._file_node(p)
-            if root.is_file():
-                loose.append(node)
-                continue
-            folder = top.setdefault(ri, {"type": "folder", "name": root.name or str(root), "key": f"r{ri}", "children": []})
-            parts = p.relative_to(root).parts[:-1]
-            cur = folder
-            for k, part in enumerate(parts):
-                key = f"r{ri}/" + "/".join(parts[:k + 1])
-                nxt = next((c for c in cur["children"] if c["type"] == "folder" and c["key"] == key), None)
-                if nxt is None:
-                    nxt = {"type": "folder", "name": part, "key": key, "children": []}
-                    cur["children"].append(nxt)
-                cur = nxt
-            cur["children"].append(node)
-        roots = [top[ri] for ri in sorted(top)]
+        roots = [nodes[f"r{ri}"] for ri, r in enumerate(self.roots) if r.is_dir() and f"r{ri}" in nodes]
         for r in roots:
             sort_children(r)
         if loose:
             loose.sort(key=lambda c: natural_key(c["name"]))
             roots.append({"type": "folder", "name": "開いたPDF", "key": "files", "children": loose})
         return {"roots": roots, "current": self.current_id, "hashing": self.hashing_remaining(),
-                "truncated": truncated, "backend": self.backend_name, "files": len(files)}
+                "truncated": truncated, "backend": self.backend_name, "files": len(files),
+                "readonly": self.readonly, "ocr": self.ocr_status()}
+
+    # ---------------------------------------------------------------- ファイル操作（名前の変更・移動・削除・フォルダ作成）
+    def _check_fs(self):
+        if self.readonly:
+            raise SessionError("読み取り専用で起動しているため、ファイルは動かせない（--readonly）", 403)
+
+    def _resolve(self, t) -> tuple[Path, bool]:
+        """PDF の ID かフォルダのキーから、実際のパスを引く。直前の走査にあるものだけを受け付ける。"""
+        if not isinstance(t, str) or not t:
+            raise SessionError("対象が不正")
+        self.scan()
+        if _ID_RE.match(t):
+            p = self.index.get(t)
+            if p is None:
+                self.scan(force=True)
+                p = self.index.get(t)
+            if p is None or not self._allowed(p):
+                raise SessionError("その PDF は一覧にない", 404)
+            return p, False
+        d = self.folders.get(t)
+        if d is None:
+            self.scan(force=True)
+            d = self.folders.get(t)
+        if d is None or d.is_symlink() or not d.is_dir():
+            raise SessionError("そのフォルダは一覧にない", 404)
+        return d, True
+
+    def _not_root(self, p: Path):
+        if p in self.roots:
+            raise SessionError("一覧の一番上（起動時に指定した場所）は、名前の変更・移動・削除ができない")
+
+    def _pdfs_under(self, d: Path) -> list[Path]:
+        files, _ = self.scan()
+        return [p for _, p in files if d in p.parents]
+
+    def _log_op(self, action: str, **kw):
+        """操作の記録（いつ・何を・どこへ）。library/operations.jsonl に追記する。"""
+        try:
+            p = library_root(self.library) / "operations.jsonl"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "action": action, **kw}, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    def _rekey_cache(self, old: Path, new: Path):
+        """移動・名前変更したファイルのハッシュの記録を、新しいパスに付け替える（再計算しない）。"""
+        with self.lock:
+            self._load_cache()
+            for k in list(self._hash):
+                kp = Path(k)
+                if kp == old or old in kp.parents:
+                    self._hash[str(new / kp.relative_to(old))] = self._hash.pop(k)
+            self._save_cache()
+
+    def _rename_path(self, src: Path, dest: Path):
+        try:
+            os.rename(src, dest)
+        except OSError as e:
+            if e.errno != errno.EXDEV:
+                raise SessionError(f"動かせなかった: {e.strerror}", 500) from e
+            try:
+                shutil.move(str(src), str(dest))  # 別のディスクへ（コピーしてから元を消す）
+            except OSError as e2:
+                raise SessionError(f"動かせなかった: {e2.strerror}", 500) from e2
+
+    def _do_move(self, src: Path, dest: Path, isdir: bool) -> dict[str, str]:
+        """src を dest に動かす。PDF の ID の対応（旧→新）を返す。開いている PDF が動くなら、開き直す。"""
+        old = {file_id(p): p for p in self._pdfs_under(src)} if isdir else {file_id(src): src}
+        cur = self.session.input if self.session is not None else None
+        self._rename_path(src, dest)
+        self._rekey_cache(src, dest)
+        mapping = {oid: file_id(dest / op.relative_to(src) if isdir else dest) for oid, op in old.items()}
+        self._log_op("move", src=str(src), dest=str(dest), kind="folder" if isdir else "pdf")
+        self._scan = None
+        self.scan(force=True)
+        if cur is not None and (cur == src or src in cur.parents):
+            new_id = mapping.get(file_id(cur))
+            self._release()
+            if new_id:
+                self.open(new_id, auto=False)
+        return mapping
+
+    def mkdir(self, parent_key: str, name: str) -> dict:
+        self._check_fs()
+        with self.lock:
+            parent, isdir = self._resolve(parent_key)
+            if not isdir:
+                raise SessionError("フォルダの中にしか作れない")
+            dest = parent / clean_name(name, False)
+            if dest.exists() or dest.is_symlink():
+                raise SessionError("同じ名前のフォルダ・ファイルがある", 409)
+            try:
+                dest.mkdir()  # 1 つだけ作る（途中のフォルダは作らない）
+            except OSError as e:
+                raise SessionError(f"作れなかった: {e.strerror}", 500) from e
+            self._log_op("mkdir", path=str(dest))
+            self._scan = None
+            self.scan(force=True)
+            key = next((k for k, d in self.folders.items() if d == dest), None)
+            return {"key": key, "name": dest.name}
+
+    def rename(self, target: str, name: str) -> dict:
+        self._check_fs()
+        with self.lock:
+            src, isdir = self._resolve(target)
+            self._not_root(src)
+            dest = src.with_name(clean_name(name, not isdir))
+            if dest == src:
+                raise SessionError("名前が変わっていない")
+            if (dest.exists() or dest.is_symlink()) and not (dest.exists() and os.path.samefile(src, dest)):
+                raise SessionError("同じ名前のフォルダ・ファイルがある", 409)
+            mapping = self._do_move(src, dest, isdir)
+            return {"moved": mapping, "current": self.current_id, "name": dest.name}
+
+    def move(self, targets: list, dest_key: str) -> dict:
+        self._check_fs()
+        with self.lock:
+            dest_dir, d_isdir = self._resolve(dest_key)
+            if not d_isdir:
+                raise SessionError("移動先はフォルダを選ぶ")
+            if not isinstance(targets, list) or not targets:
+                raise SessionError("対象がない")
+            items = [self._resolve(t) for t in targets]
+            for src, _ in items:
+                self._not_root(src)
+            # フォルダとその中身の両方が選ばれていたら、フォルダだけを動かす
+            dirs = [src for src, isdir in items if isdir]
+            items = [(src, isdir) for src, isdir in items if not any(d in src.parents for d in dirs)]
+            plan = []
+            for src, isdir in items:
+                if src.parent == dest_dir:
+                    raise SessionError(f"「{src.name}」はすでにその場所にある")
+                if isdir and (dest_dir == src or src in dest_dir.parents):
+                    raise SessionError(f"フォルダ「{src.name}」は、自分の中には移せない")
+                dest = dest_dir / src.name
+                if dest.exists() or dest.is_symlink():
+                    raise SessionError(f"移動先に同じ名前がある: {src.name}", 409)
+                plan.append((src, dest, isdir))
+            if len({d.name for _, d, _ in plan}) != len(plan):
+                raise SessionError("同じ名前のものを同時には移せない", 409)
+            mapping: dict[str, str] = {}
+            for src, dest, isdir in plan:  # 事前の検査をすべて通してから動かす
+                mapping.update(self._do_move(src, dest, isdir))
+            return {"moved": mapping, "count": len(plan), "current": self.current_id}
+
+    def trash(self, targets: list) -> dict:
+        """ゴミ箱へ移す（永久削除ではない）。認識の結果（ライブラリ）は残る。"""
+        self._check_fs()
+        with self.lock:
+            if not isinstance(targets, list) or not targets:
+                raise SessionError("対象がない")
+            items = [self._resolve(t) for t in targets]
+            for src, _ in items:
+                self._not_root(src)
+            dirs = [src for src, isdir in items if isdir]
+            items = [(src, isdir) for src, isdir in items if not any(d in src.parents for d in dirs)]
+            cur = self.session.input if self.session is not None else None
+            if cur is not None and any(cur == src or src in cur.parents for src, _ in items):
+                self._release()
+            names = []
+            for src, isdir in items:
+                dest = move_to_trash(src, self._trash_dir)
+                self._log_op("trash", src=str(src), trash=str(dest), kind="folder" if isdir else "pdf")
+                names.append(src.name)
+            self._scan = None
+            self.scan(force=True)
+            return {"trashed": names, "current": self.current_id}
+
+    # ---------------------------------------------------------------- OCR（検出＋認識）のジョブ
+    def _ocr_targets(self, targets: list) -> list[Path]:
+        files, _ = self.scan()
+        out: list[Path] = []
+        seen: set[Path] = set()
+        for t in targets:
+            if t == "files":  # 「開いたPDF」（起動時に指定したファイル）
+                cand = [p for ri, p in files if self.roots[ri].is_file()]
+            else:
+                p, isdir = self._resolve(t)
+                cand = self._pdfs_under(p) if isdir else [p]
+            for q in cand:
+                if q not in seen:
+                    seen.add(q)
+                    out.append(q)
+        return out
+
+    def ocr_start(self, targets: list) -> dict:
+        if self.detector is None or self.backend_obj is None:
+            raise SessionError("認識モデルが設定されていない（--backend unimernet で起動）", 409)
+        if not isinstance(targets, list) or not targets:
+            raise SessionError("対象がない")
+        with self.lock:
+            if self._ocr and self._ocr["state"] == "running":
+                raise SessionError("OCR を実行中（終わるか、キャンセルしてから）", 409)
+            paths = self._ocr_targets(targets)
+            if not paths:
+                raise SessionError("対象の PDF がない")
+            job = {"state": "running", "cancel": False, "started": time.time(), "current": None,
+                   "items": [{"id": file_id(p), "name": p.name, "state": "queued", "reason": None, "found": 0,
+                              "recognized": 0, "failed": 0} for p in paths]}
+            self._ocr = job
+            self._ocr_thread = threading.Thread(target=self._ocr_run, args=(job, paths), daemon=True)
+            self._ocr_thread.start()
+            return self.ocr_status()
+
+    def _ocr_run(self, job: dict, paths: list[Path]):
+        try:
+            for item, path in zip(job["items"], paths):
+                if job["cancel"]:
+                    item["state"] = "cancelled"
+                    continue
+                item["state"] = "running"
+                job["current"] = item["name"]
+                try:
+                    with self.lock:
+                        cur = self.session if (self.session is not None and self.session.input == path) else None
+                    if cur is not None:  # 開いている PDF は、ビューアのセッションで処理する（結果の書き込みを 1 か所にするため）
+                        cur.start_auto()
+                        while cur.auto_status()["state"] == "running" and not job["cancel"]:
+                            time.sleep(0.4)
+                        st = cur.auto_status()
+                        item["state"] = "cancelled" if job["cancel"] else ("error" if st["state"] == "error" else "done")
+                        item["reason"] = st.get("error")
+                        continue
+                    r = prepare_one(path, detector=self.detector, backend=self.backend_obj, library=self.library,
+                                    should_stop=lambda: job["cancel"], log=lambda *_: None)
+                    st = r.get("state")
+                    if st == "done":
+                        item.update(state="done", found=r.get("found", 0), recognized=r.get("recognized", 0),
+                                    failed=r.get("failed", 0))
+                    elif st == "interrupted":
+                        item["state"] = "cancelled"
+                    elif st == "skipped":
+                        item.update(state="skipped", reason=r.get("reason"))
+                    else:
+                        item.update(state="error", reason=r.get("reason"))
+                except RecognizerUnavailable as e:
+                    item.update(state="error", reason=str(e))
+                    job["state"] = "error"
+                    break
+                except Exception as e:  # 1 つの PDF の失敗で、残りを止めない
+                    item.update(state="error", reason=f"{type(e).__name__}: {e}")
+            if job["state"] == "running":
+                job["state"] = "cancelled" if job["cancel"] else "done"
+        finally:
+            job["current"] = None
+            job["finished"] = time.time()
+
+    def ocr_status(self) -> dict | None:
+        with self.lock:
+            j = self._ocr
+            if j is None:
+                return None
+            items = [dict(i) for i in j["items"]]
+            finished = [i for i in items if i["state"] in ("done", "error", "skipped", "cancelled")]
+            return {"state": j["state"], "started": j["started"], "total": len(items), "finished": len(finished),
+                    "current": j["current"],
+                    "ok": sum(1 for i in items if i["state"] == "done"),
+                    "failed": sum(1 for i in items if i["state"] == "error"),
+                    "skipped": sum(1 for i in items if i["state"] == "skipped"),
+                    "elapsed_s": round((j.get("finished") or time.time()) - j["started"], 1), "items": items}
+
+    def ocr_cancel(self) -> dict | None:
+        with self.lock:
+            if self._ocr and self._ocr["state"] == "running":
+                self._ocr["cancel"] = True
+            return self.ocr_status()
 
     # ---------------------------------------------------------------- 開く・切り替える
     def _allowed(self, path: Path) -> bool:
@@ -326,6 +618,10 @@ class Hub:
             return self.session
 
     def close(self):
+        if self._ocr and self._ocr["state"] == "running":
+            self._ocr["cancel"] = True
+            if self._ocr_thread is not None:
+                self._ocr_thread.join(timeout=30)
         with self.lock:
             if self._lock_cm is not None or self.session is not None:
                 self._release()

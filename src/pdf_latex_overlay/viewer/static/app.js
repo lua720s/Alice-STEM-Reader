@@ -19,7 +19,10 @@ const state = {
 async function api(method, path, body) {
   const opt = { method, headers: { "X-Token": token } };
   if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
-  const r = await fetch(path, opt);
+  let r;
+  try { r = await fetch(path, opt); }
+  catch (e) { setConn(false); throw new Error(CONN_MSG); }  // 「Failed to fetch」: サーバーに届かなかった
+  setConn(true);
   const ct = r.headers.get("Content-Type") || "";
   const data = ct.startsWith("application/json") ? await r.json() : await r.blob();
   if (!r.ok) throw new Error((data && data.error) || `HTTP ${r.status}`);
@@ -30,6 +33,16 @@ function toast(msg, ms = 2200) {
   const t = $("toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), ms);
 }
+
+// ============================================================ 接続の状態
+// ビューアが終了した、または起動し直して接続先（ポート・トークン）が変わると、ブラウザは「Failed to fetch」を返す。
+// 何が起きたかを画面に出し、つながり直したら自動で消す。
+const CONN_MSG = "ビューアに接続できません（終了したか、起動し直して接続先が変わった可能性があります）";
+let connOk = true;
+function setConn(ok) { if (ok === connOk) return; connOk = ok; $("conn").hidden = ok; }
+$("conn-retry").addEventListener("click", async () => {
+  try { await loadTree(true); toast("再接続しました", 1500); } catch (e) { toast("まだ接続できません。ビューアが動いているか確認してください", 3500); }
+});
 
 // 上のバーの実際の高さ（折り返すと増える）を CSS に伝える。狭い画面のコレクションの位置などに使う
 new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", `${$("topbar").offsetHeight}px`)).observe($("topbar"));
@@ -299,10 +312,13 @@ window.addEventListener("mouseup", async (ev) => {
 const ICON = {
   folder: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
   file: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/></svg>',
+  more: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>',
+  ocr: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 9h8M8 12h8M8 15h5"/></svg>',
   chev: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
 };
 const STATE_TEXT = { done: "準備済み", partial: "一部のみ処理済み", running: "処理中", none: "未処理", unknown: "確認中" };
-const tree = { data: null, json: "", expanded: new Set(), firstTime: false, filter: "", rows: [], els: new Map(), focusKey: null, fast: false };
+const tree = { data: null, json: "", expanded: new Set(), firstTime: false, filter: "", rows: [], els: new Map(), focusKey: null, fast: false,
+  sel: new Set(), selectMode: false, nodes: new Map(), ocr: null, ocrClosed: null, prevOcr: null, ocrRunning: false };
 
 try {
   const v = JSON.parse(LS.get("plo-expanded", "null"));
@@ -340,7 +356,7 @@ function renderTree() {
   roots.forEach(annotate);
   tree.rows = []; tree.els = new Map();
   const frag = document.createDocumentFragment();
-  const add = (node0, depth, parentKey) => {
+  const add = (node0, depth, parentKey, anc = false) => {
     // 子がフォルダ1つだけの連なりは、1 行にまとめる（深い階層でも名前が読める）
     let node = node0, label = node0.name;
     while (node.type === "folder" && node.children.length === 1 && node.children[0].type === "folder") {
@@ -350,10 +366,10 @@ function renderTree() {
     const key = isFolder ? node.key : node.id;
     const open = isFolder && (q ? true : tree.expanded.has(node.key));
     tree.rows.push({ key, node, depth, parentKey, isFolder, open });
-    const row = makeRow(node, key, depth, isFolder, open, label);
+    const row = makeRow(node, key, depth, isFolder, open, label, anc);
     tree.els.set(key, row);
     frag.append(row);
-    if (isFolder && open) node.children.forEach((c) => add(c, depth + 1, key));
+    if (isFolder && open) node.children.forEach((c) => add(c, depth + 1, key, anc || tree.sel.has(key)));
   };
   roots.forEach((r) => add(r, 0, null));
   el.textContent = "";
@@ -370,34 +386,69 @@ function renderTree() {
   const ready = t.roots.reduce((a, r) => a + r._done, 0);
   $("tree-foot").textContent = `${t.files} 個のPDF・準備済み ${ready}` + (t.hashing > 0 ? `・状態を確認中 ${t.hashing}` : "")
     + (t.truncated ? "・一部のみ表示（上限）" : "");
+  updateSelBar();
 }
 
-function makeRow(node, key, depth, isFolder, open, label) {
+function rowBtn(icon, title) {
+  const b = document.createElement("button");
+  b.type = "button"; b.tabIndex = -1; b.title = title; b.setAttribute("aria-label", title); b.innerHTML = icon;
+  return b;
+}
+
+function makeRow(node, key, depth, isFolder, open, label, anc = false) {
   const isCur = !isFolder && tree.data && key === tree.data.current;
+  const picked = tree.selectMode && (tree.sel.has(key) || anc);
   const row = document.createElement("div");
-  row.className = `trow ${isFolder ? "folder" : "file"}${isCur ? " current" : ""}`;
+  row.className = `trow ${isFolder ? "folder" : "file"}${isCur ? " current" : ""}${picked ? " picked" : ""}`;
   row.setAttribute("role", "treeitem");
   row.setAttribute("aria-level", String(depth + 1));
   if (isFolder) row.setAttribute("aria-expanded", String(open));
   if (isCur) row.setAttribute("aria-current", "true");
+  if (tree.selectMode) row.setAttribute("aria-selected", String(picked));
   row.dataset.key = key; row.tabIndex = -1; row.style.setProperty("--d", String(depth));
+  if (tree.selectMode) {
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.className = "rowchk"; cb.checked = picked; cb.disabled = anc; cb.tabIndex = -1; cb.setAttribute("aria-label", "選択");
+    cb.addEventListener("click", (ev) => { ev.stopPropagation(); tree.focusKey = key; toggleSel(key); });
+    row.append(cb);
+  }
   const chev = document.createElement("span"); chev.className = `chev${open ? " open" : ""}`; if (isFolder) chev.innerHTML = ICON.chev;
   const ico = document.createElement("span"); ico.className = "ico"; ico.innerHTML = isFolder ? ICON.folder : ICON.file;
   const name = document.createElement("span"); name.className = "name"; name.textContent = label || node.name;
   row.append(chev, ico, name);
+  // 行の右の操作（マウスを乗せたとき）: フォルダ全体のOCR、⋯ メニュー
+  const btns = document.createElement("span"); btns.className = "rowbtns";
+  if (isFolder) {
+    const ob = rowBtn(ICON.ocr, "このフォルダ全体をOCR");
+    ob.addEventListener("click", (ev) => { ev.stopPropagation(); actOcr([key]); });
+    btns.append(ob);
+  }
+  const mb = rowBtn(ICON.more, "メニュー（名前を変更・移動・削除・OCR）");
+  mb.addEventListener("click", (ev) => { ev.stopPropagation(); tree.focusKey = key; const r = mb.getBoundingClientRect(); showMenu(r.left, r.bottom + 4, menuItemsFor(key), row); });
+  btns.append(mb);
+  row.append(btns);
+  row.addEventListener("contextmenu", (ev) => { ev.preventDefault(); tree.focusKey = key; showMenu(ev.clientX, ev.clientY, menuItemsFor(key), row); });
   const meta = document.createElement("span"); meta.className = "meta";
+  // クリック: 開く / 開閉。⌘・Ctrl＋クリックと、複数選択モードでは、選択を切り替える
+  const onClick = (ev) => {
+    tree.focusKey = key;
+    if (ev.metaKey || ev.ctrlKey) { if (!tree.selectMode) setSelectMode(true); toggleSel(key); return; }
+    if (tree.selectMode) { toggleSel(key); return; }
+    if (isFolder) toggleFolder(node.key); else { updateFocus(false); openDoc(node.id); }
+  };
   if (isFolder) {
     meta.textContent = node._files ? `${node._done}/${node._files}` : "";
     row.title = `${label || node.name}\n${node._files} 個のPDF（準備済み ${node._done}）`;
     row.append(meta);
-    row.addEventListener("click", () => { tree.focusKey = key; toggleFolder(node.key); });
+    chev.addEventListener("click", (ev) => { ev.stopPropagation(); tree.focusKey = key; toggleFolder(node.key); });
+    row.addEventListener("click", onClick);
     return row;
   }
   const dot = document.createElement("span"); dot.className = `dot ${node.state}`;
   if (node.formulas != null) meta.textContent = `式 ${node.formulas}`;
   row.append(meta, dot);
   row.title = `${node.name}\n${STATE_TEXT[node.state] || ""}${node.pages ? `・${node.pages} ページ` : ""}`;
-  row.addEventListener("click", () => { tree.focusKey = key; updateFocus(false); openDoc(node.id); });
+  row.addEventListener("click", onClick);
   return row;
 }
 
@@ -435,8 +486,10 @@ $("tree").addEventListener("keydown", (ev) => {
       else if (r.parentKey) go(r.parentKey);
       break;
     case "Enter": case " ":
-      if (r.isFolder) toggleFolder(r.node.key); else openDoc(r.node.id);
+      if (ev.key === " " && tree.selectMode) toggleSel(r.key);
+      else if (r.isFolder) toggleFolder(r.node.key); else openDoc(r.node.id);
       break;
+    case "F2": if (!isRootKey(r.key)) actRename(r.key); break;
     default: return;
   }
   ev.preventDefault();
@@ -454,8 +507,15 @@ $("tree-refresh").addEventListener("click", async () => { try { await loadTree(t
 async function loadTree(force = false) {
   const t = await api("GET", force ? "/api/tree?refresh=1" : "/api/tree");
   if (tree.firstTime) { tree.firstTime = false; t.roots.forEach((r) => tree.expanded.add(r.key)); saveExpanded(); }
-  const j = JSON.stringify(t);
-  if (j !== tree.json) { tree.json = j; tree.data = t; renderTree(); }
+  const { ocr, ...rest } = t;  // OCR の進み具合は、ツリーの再描画と分けて扱う
+  const j = JSON.stringify(rest);
+  if (j !== tree.json) { tree.json = j; tree.data = t; indexTree(); renderTree(); } else { tree.data.ocr = ocr; }
+  if (tree.prevOcr === "running" && ocr && ocr.state !== "running") {
+    toast(ocr.state === "done" ? `OCRが終わりました（成功 ${ocr.ok}・失敗 ${ocr.failed}・スキップ ${ocr.skipped}）` : "OCRを止めました", 5000);
+    if (state.doc) refresh();
+  }
+  tree.prevOcr = ocr ? ocr.state : null; tree.ocr = ocr; tree.ocrRunning = !!(ocr && ocr.state === "running");
+  renderOcrBar(ocr);
   return t;
 }
 
@@ -478,7 +538,7 @@ function pollTree() {
   treeTimer = setTimeout(async () => {
     if (!document.hidden) { try { const t = await loadTree(); tree.fast = tree.fast || t.hashing > 0; } catch (e) { /* 次回 */ } }
     pollTree();
-  }, tree.fast || (tree.data && tree.data.hashing > 0) ? 2000 : 8000);
+  }, !connOk ? 3000 : (tree.fast || tree.ocrRunning || (tree.data && tree.data.hashing > 0)) ? 2000 : 8000);
 }
 
 // ---- コレクションの開閉と幅
@@ -508,6 +568,240 @@ matchMedia("(max-width: 900px)").addEventListener("change", (e) => setSidebar(!e
   });
 })();
 
+// ============================================================ ⋯ メニュー
+let menuEl = null;
+function closeMenu() {
+  if (!menuEl) return;
+  menuEl.remove(); menuEl = null;
+  document.removeEventListener("pointerdown", onMenuOutside, true);
+}
+function onMenuOutside(ev) { if (menuEl && !menuEl.contains(ev.target)) closeMenu(); }
+
+function showMenu(x, y, items, returnFocus) {
+  closeMenu();
+  if (!items.length) return;
+  const m = document.createElement("div"); m.className = "menu"; m.setAttribute("role", "menu");
+  for (const it of items) {
+    if (it === "-") { m.append(document.createElement("hr")); continue; }
+    const b = document.createElement("button"); b.type = "button"; b.setAttribute("role", "menuitem");
+    b.textContent = it.label;
+    if (it.danger) b.classList.add("danger");
+    if (it.disabled) { b.disabled = true; if (it.title) b.title = it.title; }
+    b.addEventListener("click", () => { closeMenu(); if (returnFocus && returnFocus.focus) returnFocus.focus(); it.run(); });
+    m.append(b);
+  }
+  document.body.append(m); menuEl = m;
+  const r = m.getBoundingClientRect();
+  m.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  m.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8))}px`;
+  const btns = [...m.querySelectorAll("button:not(:disabled)")];
+  if (btns[0]) btns[0].focus();
+  m.addEventListener("keydown", (ev) => {
+    const i = btns.indexOf(document.activeElement);
+    if (ev.key === "ArrowDown") { btns[(i + 1) % btns.length].focus(); ev.preventDefault(); }
+    else if (ev.key === "ArrowUp") { btns[(i - 1 + btns.length) % btns.length].focus(); ev.preventDefault(); }
+    else if (ev.key === "Escape") { closeMenu(); if (returnFocus && returnFocus.focus) returnFocus.focus(); ev.preventDefault(); ev.stopPropagation(); }
+    else if (ev.key === "Tab") closeMenu();
+  });
+  setTimeout(() => document.addEventListener("pointerdown", onMenuOutside, true), 0);
+}
+function menuAt(btn, items) { const r = btn.getBoundingClientRect(); showMenu(r.left, r.bottom + 4, items, btn); }
+
+// ============================================================ ダイアログ（名前の入力・フォルダの選択・確認）
+const dlg = $("dlg");
+function ask(opts) {
+  return new Promise((resolve) => {
+    $("dlg-title").textContent = opts.title;
+    const msg = $("dlg-msg"); msg.textContent = opts.message || ""; msg.hidden = !opts.message;
+    const inp = $("dlg-input"); inp.hidden = !("value" in opts);
+    if (!inp.hidden) { inp.value = opts.value; inp.placeholder = opts.placeholder || ""; }
+    const list = $("dlg-list"); list.hidden = !opts.folders; list.textContent = "";
+    const ok = $("dlg-ok"); ok.textContent = opts.ok || "OK";
+    ok.classList.toggle("danger-solid", !!opts.danger); ok.classList.toggle("primary", !opts.danger);
+    ok.disabled = !!opts.folders;
+    let picked = null, done = false;
+    const finish = (yes) => {
+      if (done) return;
+      done = true; dlg.close();
+      resolve(yes ? { value: inp.hidden ? null : inp.value, key: picked } : null);
+    };
+    for (const f of opts.folders || []) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "pick"; b.setAttribute("role", "option"); b.style.paddingLeft = `${10 + f.depth * 14}px`; b.textContent = f.name;
+      b.addEventListener("click", () => { picked = f.key; list.querySelectorAll(".pick").forEach((x) => x.classList.toggle("on", x === b)); ok.disabled = false; });
+      b.addEventListener("dblclick", () => { picked = f.key; finish(true); });
+      list.append(b);
+    }
+    $("dlg-form").onsubmit = (ev) => { ev.preventDefault(); if (!ok.disabled) finish(true); };
+    $("dlg-cancel").onclick = () => finish(false);
+    dlg.oncancel = (ev) => { ev.preventDefault(); finish(false); };
+    dlg.showModal();
+    if (!inp.hidden) { inp.focus(); inp.select(); } else if (opts.folders) { const f = list.querySelector(".pick"); if (f) f.focus(); } else ok.focus();
+  });
+}
+
+// ============================================================ コレクションの操作（名前の変更・移動・ゴミ箱・新しいフォルダ・OCR）
+const isRootKey = (k) => /^r\d+$/.test(k) || k === "files";
+const noModels = () => !tree.data || !tree.data.backend || tree.data.backend === "none";
+
+function indexTree() {
+  tree.nodes = new Map();
+  const walk = (n) => { tree.nodes.set(n.type === "folder" ? n.key : n.id, n); if (n.type === "folder") n.children.forEach(walk); };
+  tree.data.roots.forEach(walk);
+}
+function fileIdsUnder(n, out = new Set()) {
+  if (n.type === "file") out.add(n.id); else n.children.forEach((c) => fileIdsUnder(c, out));
+  return out;
+}
+function descendantKeys(n, out = []) {
+  if (n.type === "folder") n.children.forEach((c) => { out.push(c.type === "folder" ? c.key : c.id); descendantKeys(c, out); });
+  return out;
+}
+function countFiles(keys) {
+  const s = new Set();
+  for (const k of keys) { const n = tree.nodes.get(k); if (n) fileIdsUnder(n, s); }
+  return s.size;
+}
+function pickerFolders(excludeKeys) {
+  const out = [];
+  const walk = (n, depth) => {
+    if (n.type !== "folder" || n.key === "files") return;
+    if (excludeKeys.some((k) => n.key === k || n.key.startsWith(`${k}/`))) return;  // 自分自身と、その中へは移せない
+    out.push({ key: n.key, name: n.name, depth });
+    n.children.forEach((c) => walk(c, depth + 1));
+  };
+  tree.data.roots.forEach((r) => walk(r, 0));
+  return out;
+}
+function defaultFolderKey() {  // 選んでいる行のフォルダ（ファイルなら、その親）。なければ最初の一番上のフォルダ
+  const row = tree.rows.find((r) => r.key === tree.focusKey);
+  if (row) { const k = row.isFolder ? row.node.key : row.parentKey; if (k && k !== "files") return k; }
+  const first = tree.data && tree.data.roots.find((r) => r.key !== "files");
+  return first ? first.key : null;
+}
+
+function menuItemsFor(key) {
+  const n = tree.nodes.get(key);
+  if (!n || !tree.data) return [];
+  const ro = !!tree.data.readonly, noModel = noModels();
+  const fsItem = (label, run, extra = {}) => ({ label, run, disabled: ro, title: ro ? "読み取り専用で起動しているため、ファイルは動かせません" : "", ...extra });
+  const ocr = { label: n.type === "folder" ? "OCRを行う（フォルダ全体）" : "OCRを行う", run: () => actOcr([key]), disabled: noModel,
+    title: noModel ? "認識モデルがありません（--backend unimernet で起動）" : "" };
+  if (n.type === "file") {
+    return [ocr, fsItem("名前を変更", () => actRename(key)), fsItem("別の場所へ移動", () => actMove([key])), "-",
+      fsItem("ゴミ箱へ移動", () => actTrash([key]), { danger: true })];
+  }
+  const items = [ocr];
+  if (key !== "files") items.push(fsItem("新しいフォルダ", () => actNewFolder(key)));
+  if (!isRootKey(key)) {
+    items.push(fsItem("名前を変更", () => actRename(key)), fsItem("別の場所へ移動", () => actMove([key])), "-",
+      fsItem("ゴミ箱へ移動", () => actTrash([key]), { danger: true }));
+  }
+  return items;
+}
+
+// 操作のあと: 一覧を読み直し、動いた・消えた PDF が開いていたなら、表示も合わせる
+async function syncAfterFs() {
+  await loadTree(true);
+  for (const k of [...tree.sel]) if (!tree.nodes.has(k)) tree.sel.delete(k);
+  const cur = tree.data.current;
+  if (cur !== state.docId) { await loadDoc(); if (cur) LS.set("plo-last", cur); revealCurrent(); }
+  renderTree();
+}
+async function doFs(path, body) {
+  try { const r = await api("POST", path, body); await syncAfterFs(); return r; }
+  catch (e) { toast(`失敗: ${e.message}`, 6000); return null; }
+}
+
+async function actRename(key) {
+  const n = tree.nodes.get(key);
+  if (!n) return;
+  const isFile = n.type === "file", cur = isFile ? n.name.replace(/\.pdf$/i, "") : n.name;
+  const r = await ask({ title: isFile ? "PDFの名前を変更" : "フォルダの名前を変更", message: isFile ? "拡張子（.pdf）は自動で付きます。" : "", value: cur, ok: "変更" });
+  if (!r) return;
+  const v = r.value.trim();
+  if (!v || v === cur) return;
+  if (await doFs("/api/fs/rename", { target: key, name: v })) toast("名前を変更しました");
+}
+async function actMove(keys) {
+  if (!keys.length) return;
+  const folders = pickerFolders(keys.filter((k) => (tree.nodes.get(k) || {}).type === "folder"));
+  if (!folders.length) { toast("移動先のフォルダがありません"); return; }
+  const r = await ask({ title: "別の場所へ移動", message: "移動先のフォルダを選んでください。", folders, ok: "移動" });
+  if (!r || !r.key) return;
+  const res = await doFs("/api/fs/move", { targets: keys, dest: r.key });
+  if (res) { tree.sel.clear(); renderTree(); toast(`${res.count} 件を「${(tree.nodes.get(r.key) || {}).name || ""}」へ移動しました`); }
+}
+async function actTrash(keys) {
+  const nodes = keys.map((k) => tree.nodes.get(k)).filter(Boolean);
+  if (!nodes.length) return;
+  const files = countFiles(keys), one = nodes.length === 1 ? nodes[0] : null;
+  const msg = one ? (one.type === "folder" ? `フォルダ「${one.name}」を、中のPDF ${files} 個ごとゴミ箱へ移動します。` : `「${one.name}」をゴミ箱へ移動します。`)
+    : `選んだ ${nodes.length} 件（PDF ${files} 個）をゴミ箱へ移動します。`;
+  const r = await ask({ title: "ゴミ箱へ移動", message: `${msg}\nゴミ箱から元に戻せます。認識した結果は残ります。`, ok: "ゴミ箱へ移動", danger: true });
+  if (!r) return;
+  const res = await doFs("/api/fs/trash", { targets: keys });
+  if (res) { tree.sel.clear(); renderTree(); toast(`${res.trashed.length} 件をゴミ箱へ移動しました`); }
+}
+async function actNewFolder(parentKey) {
+  if (!tree.data || !parentKey) { toast("フォルダを作る場所がありません"); return; }
+  const parent = tree.nodes.get(parentKey);
+  const r = await ask({ title: "新しいフォルダ", message: `「${parent ? parent.name : ""}」の中に作ります。`, value: "", placeholder: "フォルダの名前", ok: "作成" });
+  if (!r || !r.value.trim()) return;
+  const res = await doFs("/api/fs/mkdir", { parent: parentKey, name: r.value });
+  if (res) {
+    tree.expanded.add(parentKey); saveExpanded();
+    tree.focusKey = res.key; renderTree(); updateFocus(true);
+    toast(`フォルダ「${res.name}」を作りました`);
+  }
+}
+async function actOcr(keys) {
+  if (noModels()) { toast("認識モデルがありません（--backend unimernet で起動）", 4000); return; }
+  const n = countFiles(keys);
+  if (!n) { toast("対象のPDFがありません"); return; }
+  if (n > 1) {
+    const r = await ask({ title: "OCRを行う", message: `${n} 個のPDFの数式を検出・認識します。\nCPUでは1ページあたり約40秒かかります。途中でキャンセルでき、あとで続きから再開できます。`, ok: "始める" });
+    if (!r) return;
+  }
+  try { tree.ocrClosed = null; renderOcrBar(await api("POST", "/api/ocr", { targets: keys })); tree.ocrRunning = true; toast("OCRを始めました"); }
+  catch (e) { toast(`失敗: ${e.message}`, 6000); }
+}
+
+// ---- 複数選択
+function setSelectMode(on) {
+  tree.selectMode = on;
+  if (!on) tree.sel.clear();
+  $("tree-select").setAttribute("aria-pressed", String(on));
+  renderTree();
+}
+function toggleSel(key) {
+  const n = tree.nodes.get(key);
+  if (!n) return;
+  if (tree.sel.has(key)) tree.sel.delete(key);
+  else { tree.sel.add(key); if (n.type === "folder") for (const d of descendantKeys(n)) tree.sel.delete(d); }  // フォルダを選んだら、中身は個別に選ばない
+  renderTree();
+}
+function updateSelBar() {
+  const n = tree.sel.size;
+  $("selbar").hidden = n === 0;
+  if (n) $("selcount").textContent = `${n} 件を選択中（PDF ${countFiles([...tree.sel])} 個）`;
+}
+
+// ---- OCR の進み具合
+function renderOcrBar(o) {
+  const bar = $("ocrbar");
+  if (!o || o.state === "idle" || (o.state !== "running" && tree.ocrClosed === o.started)) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const running = o.state === "running", bad = o.items.filter((i) => i.state === "error" || i.state === "skipped");
+  $("ocrtext").textContent = running ? `OCR ${o.finished}/${o.total}${o.current ? `・${o.current}` : ""}`
+    : o.state === "cancelled" ? `OCRを中止しました（${o.finished}/${o.total}）`
+    : o.state === "error" ? `OCRが止まりました: ${(o.items.find((i) => i.state === "error") || {}).reason || ""}`
+    : `OCR完了（成功 ${o.ok}・失敗 ${o.failed}・スキップ ${o.skipped}）`;
+  $("ocrtext").title = bad.map((i) => `${i.name}: ${i.reason || i.state}`).join("\n");
+  $("ocrprog").style.width = `${Math.round(((o.finished + (running ? 0.5 : 0)) / Math.max(1, o.total)) * 100)}%`;
+  $("ocr-cancel").hidden = !running; $("ocr-close").hidden = running;
+}
+
 // ============================================================ PDF の切り替え
 let lastVersion = -1;
 
@@ -526,9 +820,9 @@ async function openDoc(id, quiet = false) {
 // 開いたら、ページ送りのキー（←→・Space）がすぐ効くよう、フォーカスをページ側へ移す
 function focusDeck() { pagesEl.tabIndex = -1; pagesEl.focus({ preventScroll: true }); }
 
-async function loadDoc() {
+async function loadDoc(knownEmpty = false) {
   let doc = null;
-  try { doc = await api("GET", "/api/doc"); } catch (e) { doc = null; }
+  if (!knownEmpty) { try { doc = await api("GET", "/api/doc"); } catch (e) { doc = null; } }
   state.doc = doc; state.docId = doc ? doc.id : null;
   state.formulas = []; state.selected = null; state.cur = 0; lastVersion = -1;
   showDetail(null);
@@ -539,6 +833,7 @@ async function loadDoc() {
   $("stats").textContent = "";
   $("autostat").textContent = "";
   $("autorun").disabled = !doc || !doc.backend || doc.backend === "none";
+  $("doc-menu").disabled = !doc;
   $("autorun").classList.remove("attention");
   if (!doc) { imgObserver.disconnect(); pagesEl.textContent = ""; slots = []; updatePageUI(); return; }
   buildDeck();
@@ -546,6 +841,7 @@ async function loadDoc() {
   state.cur = Math.max(0, Math.min(saved, slots.length - 1));
   requestAnimationFrame(() => { goto(state.cur, false); updatePageUI(); });
   await refresh();
+  updateAutoStatus();  // 「未処理」の表示と、「このページを認識」の強調を、開いてすぐ反映する
 }
 
 // ============================================================ 画面の操作
@@ -562,7 +858,21 @@ function wire() {
     const id = state.selected; state.selected = null;
     act(() => api("DELETE", `/api/formulas/${encodeURIComponent(id)}`), "削除しました");
   };
-  $("autorun").onclick = () => act(() => api("POST", "/api/auto"), "全ページの認識を始めました");
+  // 「このページを認識」: いま表示しているページだけを検出・認識する（PDF全体は、⋯ の「OCRを行う」）
+  $("autorun").onclick = () => {
+    if (!state.doc) return;
+    const n = state.cur;
+    act(() => api("POST", "/api/auto", { pages: [n], force: true }), `${n + 1} ページ目の認識を始めました`);
+  };
+  $("doc-menu").onclick = () => menuAt($("doc-menu"), state.docId ? menuItemsFor(state.docId) : []);
+  $("tree-newfolder").onclick = () => actNewFolder(defaultFolderKey());
+  $("tree-select").onclick = () => setSelectMode(!tree.selectMode);
+  $("sel-ocr").onclick = () => actOcr([...tree.sel]);
+  $("sel-move").onclick = () => actMove([...tree.sel]);
+  $("sel-trash").onclick = () => actTrash([...tree.sel]);
+  $("sel-clear").onclick = () => { tree.sel.clear(); renderTree(); };
+  $("ocr-cancel").onclick = async () => { try { renderOcrBar(await api("POST", "/api/ocr/cancel")); } catch (e) { toast(`失敗: ${e.message}`, 4000); } };
+  $("ocr-close").onclick = () => { if (tree.ocr) tree.ocrClosed = tree.ocr.started; renderOcrBar(tree.ocr); };
   $("export").onclick = async () => {
     if (!state.doc) { toast("PDFを選んでください"); return; }
     $("export").disabled = true; toast("派生PDFを作成・検証しています…", 60000);
@@ -580,7 +890,7 @@ function wire() {
     if (ev.key === "Escape") { state.redrawFor = null; return; }
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     const t = ev.target;
-    if (t.closest && t.closest("input, textarea, select, [contenteditable]")) return;
+    if (t.closest && t.closest("input, textarea, select, [contenteditable], .menu, dialog")) return;
     if (t.closest && t.closest("#tree") && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(ev.key)) return;
     const fitPage = state.fit === "page";
     let handled = true;
@@ -602,7 +912,8 @@ function wire() {
   });
 }
 
-async function pollAuto() {
+// 認識の進み具合を 1 回だけ読んで画面に反映し、次に読むまでの間隔（ミリ秒）を返す
+async function updateAutoStatus() {
   let delay = 5000;
   try {
     if (state.doc) {
@@ -625,15 +936,22 @@ async function pollAuto() {
       delay = tree.fast ? 1500 : 5000;
     }
   } catch (e) { /* 次回 */ }
-  setTimeout(pollAuto, delay);
+  return delay;
 }
+async function pollAuto() { setTimeout(pollAuto, await updateAutoStatus()); }
 
 async function boot() {
   if (!token) { document.body.textContent = "トークンがありません。起動時に表示された URL を開いてください。"; return; }
   wire();
   let t;
+  // 画面に戻ってきたら、すぐ最新の状態にする（見ていない間は、負荷を減らすため更新を止めている）
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    loadTree().catch(() => {});
+    if (state.doc) refresh().catch(() => {});
+  });
   try { t = await loadTree(); } catch (e) { toast(`読み込みに失敗: ${e.message}`, 6000); return; }
-  await loadDoc();  // 起動時に開かれている PDF があれば表示する
+  await loadDoc(!t.current);  // 起動時に開かれている PDF があれば表示する
   revealCurrent();
   if (state.doc) focusDeck();
   if (!state.doc) {  // なければ、前回開いていた PDF（一覧に残っていれば）を開く

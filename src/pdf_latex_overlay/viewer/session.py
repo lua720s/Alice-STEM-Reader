@@ -238,7 +238,12 @@ class ViewerSession:
             st.update(state="preparing", phase="prepare", pid=pid)
         return st
 
-    def start_auto(self, detector=None) -> dict:
+    def start_auto(self, detector=None, pages=None, force: bool = False) -> dict:
+        """全ページ（既定）または pages（0 始まり）だけを、検出・認識する。force は処理済みのページも検出し直す。"""
+        if pages is not None:
+            if not isinstance(pages, list) or not pages or any(
+                    not isinstance(p, int) or isinstance(p, bool) or not (0 <= p < self.doc.page_count) for p in pages):
+                raise SessionError("pages が不正（ページ番号は 0 から始まる整数のリスト）")
         if self.preparing():
             return self.auto_status()  # 事前処理が進めているので、ビューアでは処理しない
         with self.lock:
@@ -248,12 +253,12 @@ class ViewerSession:
                 raise SessionError("認識バックエンドがない（--backend unimernet で起動）", 409)
             self.auto = {"state": "running", "phase": "detect", "page": 0, "pages": self.doc.page_count,
                          "found": 0, "recognized": 0, "error": None}
-        t = threading.Thread(target=self._auto_run, args=(detector,), daemon=True)
+        t = threading.Thread(target=self._auto_run, args=(detector, pages, force), daemon=True)
         self._auto_thread = t
         t.start()
         return dict(self.auto)
 
-    def _auto_run(self, detector):
+    def _auto_run(self, detector, pages=None, force=False):
         from ..detect.mfd import MFDDetector
         from ..prepare import process_document
 
@@ -271,10 +276,11 @@ class ViewerSession:
 
         try:
             r = process_document(self.input, self.fs, detector=det, backend=self.backend, lock=self.lock,
-                                 save=save, progress=progress, log=self._log, should_stop=self._stop.is_set)
+                                 save=save, progress=progress, log=self._log, should_stop=self._stop.is_set,
+                                 only_pages=pages, force=force)
             with self.lock:
                 self.auto.update(state="done" if r["state"] == "done" else "idle", phase="done", found=r["found"])
-            self._update_meta("done" if r["state"] == "done" else "partial")
+            self._update_meta("done" if r["state"] == "done" and pages is None else "partial")
         except Exception as e:  # 失敗は画面に表示し、途中までの結果は残す
             with self.lock:
                 self.auto.update(state="error", error=f"{type(e).__name__}: {e}")

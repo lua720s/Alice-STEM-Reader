@@ -13,6 +13,7 @@ import mimetypes
 import re
 import secrets
 import sys
+import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -100,6 +101,26 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                     b = self._body()
                     hub.open(b.get("id"))
                     return self._json(200, {"id": hub.current_id})
+                # ---- ファイル操作（フォルダ作成・名前の変更・移動・ゴミ箱へ）と、OCR のジョブ ----
+                if method == "POST" and path == "/api/fs/mkdir":
+                    b = self._body()
+                    return self._json(200, hub.mkdir(b.get("parent"), b.get("name")))
+                if method == "POST" and path == "/api/fs/rename":
+                    b = self._body()
+                    return self._json(200, hub.rename(b.get("target"), b.get("name")))
+                if method == "POST" and path == "/api/fs/move":
+                    b = self._body()
+                    return self._json(200, hub.move(b.get("targets"), b.get("dest")))
+                if method == "POST" and path == "/api/fs/trash":
+                    b = self._body()
+                    return self._json(200, hub.trash(b.get("targets")))
+                if method == "POST" and path == "/api/ocr":
+                    b = self._body()
+                    return self._json(200, hub.ocr_start(b.get("targets")))
+                if method == "GET" and path == "/api/ocr":
+                    return self._json(200, hub.ocr_status() or {"state": "idle"})
+                if method == "POST" and path == "/api/ocr/cancel":
+                    return self._json(200, hub.ocr_cancel() or {"state": "idle"})
                 session = hub.require()  # 以降は、いま開いている PDF への操作
                 if method == "GET" and path == "/api/doc":
                     return self._json(200, dict(session.doc_info(), id=hub.current_id))
@@ -108,7 +129,8 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "GET" and path == "/api/auto":
                     return self._json(200, session.auto_status())
                 if method == "POST" and path == "/api/auto":
-                    return self._json(200, session.start_auto())
+                    b = self._body()  # {"pages": [0 始まりのページ番号], "force": true}（省略すると全ページ）
+                    return self._json(200, session.start_auto(pages=b.get("pages"), force=bool(b.get("force"))))
                 m = re.fullmatch(r"/api/page/(\d+)\.png", path)
                 if method == "GET" and m:
                     dpi = int(q.get("dpi", ["110"])[0])
@@ -141,6 +163,14 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 return self._json(e.status, {"error": str(e)})
             except (ValueError, TypeError) as e:
                 return self._json(400, {"error": str(e)})
+            except (BrokenPipeError, ConnectionResetError):
+                return  # ブラウザ側が先に閉じた（ページ移動など）。応答する相手がいない
+            except Exception as e:  # 想定外でも接続を切らず、原因を返す（接続を切ると、ブラウザでは Failed to fetch になる）
+                sys.stderr.write("viewer: 想定外のエラー\n" + traceback.format_exc())
+                try:
+                    return self._json(500, {"error": f"内部エラー: {type(e).__name__}: {e}"})
+                except OSError:
+                    return
 
         def do_GET(self):
             self._dispatch("GET")
@@ -164,21 +194,27 @@ def default_workdir(input_path) -> Path:
 from ..prepare import library_root  # noqa: E402
 
 
+class _Server(ThreadingHTTPServer):
+    request_queue_size = 128  # 既定の 5 だと、ページ画像を一度に多く読み込んだとき接続が拒否されうる
+    daemon_threads = True
+
+
 def make_server(target, port: int = 0):
     """target は Hub、または 1 つの ViewerSession（単体利用・試験用）。"""
     hub = target if isinstance(target, Hub) else Hub.from_session(target)
     token = secrets.token_urlsafe(24)
     port_ref = {"port": port}
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(hub, token, port_ref))
+    httpd = _Server(("127.0.0.1", port), make_handler(hub, token, port_ref))
     port_ref["port"] = httpd.server_address[1]
     return httpd, token
 
 
-def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True) -> int:
+def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True,
+          readonly=False) -> int:
     """paths は PDF またはフォルダ（複数可）。フォルダなら左のコレクションに階層で並ぶ。"""
     paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
     try:
-        hub = Hub(paths, backend=backend, auto_on_open=False)
+        hub = Hub(paths, backend=backend, auto_on_open=False, readonly=readonly)
     except SessionError as e:
         print(str(e), file=sys.stderr)
         return 2

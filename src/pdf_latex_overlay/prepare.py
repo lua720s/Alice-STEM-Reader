@@ -131,9 +131,11 @@ def _contained(inner, outer) -> float:
 def process_document(pdf_path, fs: FormulaSet, *, detector, backend, lock=None,
                      save: Callable[[], None] = lambda: None, progress: Callable[..., None] = lambda **k: None,
                      log: Callable[..., None] = lambda *a, **k: None, should_stop: Callable[[], bool] = lambda: False,
-                     max_pages: int | None = None) -> dict:
+                     max_pages: int | None = None, only_pages=None, force: bool = False) -> dict:
     """未処理のページを検出し、未認識の枠を認識する。fs をその場で更新し、こまめに save() する。
 
+    only_pages を渡すと、そのページだけを処理する（0 始まり）。force なら、処理済みのページでも検出し直す
+    （既にある枠と重なる検出は追加しないので、既存の結果は消えない）。
     lock を渡すと（ビューアの RLock など）、fs を触る間だけ取る。認識の待ち時間は lock の外。
     戻り値: {"state": done|interrupted, "found": n, "recognized": n, "failed": n}
     """
@@ -143,10 +145,13 @@ def process_document(pdf_path, fs: FormulaSet, *, detector, backend, lock=None,
     doc = pymupdf.open(pdf_path)  # この処理専用（PyMuPDF の文書はスレッド間で共有しない）
     found = recognized = failed = 0
     try:
-        pages = range(doc.page_count if not max_pages else min(doc.page_count, max_pages))
+        if only_pages is not None:
+            pages = sorted({int(p) for p in only_pages if 0 <= int(p) < doc.page_count})
+        else:
+            pages = range(doc.page_count if not max_pages else min(doc.page_count, max_pages))
         for pno in pages:
             with lk:
-                done = pno in set(fs.meta.get("auto_pages", []))
+                done = pno in set(fs.meta.get("auto_pages", [])) and not force
             progress(phase="detect", page=pno + 1, pages=len(pages))
             if done:
                 continue
@@ -168,7 +173,8 @@ def process_document(pdf_path, fs: FormulaSet, *, detector, backend, lock=None,
                     fs.formulas.append(Formula(id=fid, page=pno, rect=tuple(d["rect"]), source="mfd",
                                                kind=d["kind"], confidence=d["conf"], status="pending"))
                     found += 1
-                fs.meta.setdefault("auto_pages", []).append(pno)
+                if pno not in fs.meta.setdefault("auto_pages", []):
+                    fs.meta["auto_pages"].append(pno)
                 fs.meta["detector"] = {"name": "PDF-Extract-Kit MFD yolo_v8_ft", **getattr(detector, "info", {}).get("versions", {})}
                 log("detect", page=pno, added=n)
                 save()
@@ -183,7 +189,13 @@ def process_document(pdf_path, fs: FormulaSet, *, detector, backend, lock=None,
                 f = next((g for g in fs.formulas if g.id == fid), None)
                 if f is None or f.latex is not None:
                     continue
-                png = crop_png(doc[f.page], f.rect, dpi=200)
+                try:
+                    png = crop_png(doc[f.page], f.rect, dpi=200)
+                except ValueError as e:  # ページの外の枠など。この式だけ失敗にして、続ける
+                    f.reason = f"recognition_failed: {e}"
+                    failed += 1
+                    save()
+                    continue
                 split = f.kind != "inline"
             res = recognize_png(backend, png, dpi=200, split=split)
             with lk:
