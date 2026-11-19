@@ -15,7 +15,9 @@
   <strong id="docname">PDF LaTeX Overlay</strong>
   <span id="stats" class="muted"></span>
   <span class="spacer"></span>
-  <span class="muted hint">ドラッグで枠を追加・クリックで選択</span>
+  <span id="autostat" class="muted hint"></span>
+  <span class="muted hint">クリックでコピー・ドラッグで枠を追加</span>
+  <button id="autorun" title="未処理のページの数式を検出して認識する">全ページを認識</button>
   <select id="mode" title="埋め込み方式">
     <option value="invisible">不可視テキスト（既定）</option>
     <option value="actualtext">ActualText</option>
@@ -26,8 +28,8 @@
 <main>
   <section id="pages" aria-label="ページ"></section>
   <aside id="panel">
-    <div id="empty" class="muted">ページ上をドラッグすると枠を追加して認識します（複数行も可）。<br>
-      枠をクリックすると、LaTeXの確認・コピー・修正ができます。</div>
+    <div id="empty" class="muted">開くと全ページの数式を自動で検出・認識します（上部に進み具合を表示）。<br>
+      枠をクリックするとLaTeXをコピーし、ここで確認・修正できます。見落とした式は、ページ上をドラッグして追加できます（複数行も可）。</div>
     <div id="detail" hidden>
       <div class="row"><b id="fid"></b><span id="fstatus" class="badge"></span><span id="fsource" class="muted"></span></div>
       <img id="crop" alt="元PDFの切り出し">

@@ -31,7 +31,11 @@ def _raw(r: Recognition) -> str | None:
 
 
 def recognize_region(backend, page: pymupdf.Page, rect, dpi: int = 200, split: bool = True) -> Recognition:
-    png = crop_png(page, rect, dpi=dpi)
+    return recognize_png(backend, crop_png(page, rect, dpi=dpi), dpi=dpi, split=split)
+
+
+def recognize_png(backend, png: bytes, dpi: int = 200, split: bool = True) -> Recognition:
+    """切り出し済みの画像を認識する（ページ文書に触れないので、別スレッドから呼べる）。"""
     lines = split_lines(png, dpi) if split else [png]
     results = backend.recognize(lines)
     raws, cleans, problems = [], [], []

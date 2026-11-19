@@ -7,3 +7,6 @@ numpy==1.26.4
 # unimernet の依存が引く datasets 5 は pyarrow>=21（NumPy 2 必須）を要求し、numpy 1.26 と衝突するため固定
 datasets<3
 pyarrow<18
+# 数式検出（PDF-Extract-Kit MFD）用。ultralytics は AGPL-3.0。2026-11-19 追加
+ultralytics==8.4.215
+opencv-python<4.13

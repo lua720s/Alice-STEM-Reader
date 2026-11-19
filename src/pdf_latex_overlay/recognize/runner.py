@@ -94,7 +94,7 @@ def run_recognition(input_path, formulas_path, out_path, backend="unimernet", wo
                 interrupted = True
                 break
             t0 = time.monotonic()
-            res = recognize_region(be, doc[f.page], f.rect, dpi=dpi)
+            res = recognize_region(be, doc[f.page], f.rect, dpi=dpi, split=f.kind != "inline")
             state["done"][f.id] = {
                 "latex": res.latex, "raw": getattr(res, "raw", res.latex), "error": res.error,
                 "elapsed_s": round(time.monotonic() - t0, 3),

@@ -96,6 +96,10 @@ def make_handler(session: ViewerSession, token: str, port_ref: dict):
                     return self._json(200, session.doc_info())
                 if method == "GET" and path == "/api/formulas":
                     return self._json(200, session.list())
+                if method == "GET" and path == "/api/auto":
+                    return self._json(200, session.auto_status())
+                if method == "POST" and path == "/api/auto":
+                    return self._json(200, session.start_auto())
                 m = re.fullmatch(r"/api/page/(\d+)\.png", path)
                 if method == "GET" and m:
                     dpi = int(q.get("dpi", ["110"])[0])
@@ -154,9 +158,11 @@ def make_server(session: ViewerSession, port: int = 0):
     return httpd, token
 
 
-def serve(input_path, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None) -> int:
+def serve(input_path, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True) -> int:
     session = ViewerSession(input_path, workdir or default_workdir(input_path), formulas_path, backend=backend)
     httpd, token = make_server(session, port)
+    if auto and backend not in (None, "", "none"):
+        session.start_auto()  # 開いた時点で全ページの数式を検出・認識する（裏で進め、画面は先に使える）
     url = f"http://127.0.0.1:{httpd.server_address[1]}/#token={token}"
     print(f"ビューア: {url}\n作業領域: {session.workdir}\n終了は Ctrl+C", flush=True)
     if open_browser:

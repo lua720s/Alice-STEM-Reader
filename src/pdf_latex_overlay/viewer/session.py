@@ -21,7 +21,7 @@ from ..pipeline import Options, process_pdf
 from ..recognize import RecognizerUnavailable, crop_png, get_backend
 from ..coords import iou
 from ..recognize.postprocess import clean_lines
-from ..recognize.region import recognize_region
+from ..recognize.region import recognize_png
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 EDITABLE_STATUS = {"pending", "confirmed", "excluded"}
@@ -48,6 +48,8 @@ class ViewerSession:
         self.doc = pymupdf.open(self.input)  # 読み取りのみ
         self.backend_name = backend
         self._backend = backend_obj
+        self.auto: dict = {"state": "idle"}
+        self.version = 0  # 式の集合が変わるたびに増やす（画面の再読み込み判定）
         if self.formulas_path.exists():
             self.fs = FormulaSet.load(self.formulas_path)
         elif formulas_path:
@@ -144,6 +146,7 @@ class ViewerSession:
             self._log("create", id=f.id, page=page, rect=list(rect), latex=latex,
                       replaced=[g.id for g in replaced])
             self._save()
+            self.version += 1
         if recognize:
             return self.recognize(f.id)
         return self._view(f)
@@ -166,6 +169,7 @@ class ViewerSession:
                 f.rect = self._to_stored(f.page, view_rect)
             self._log("update", id=fid, before=before, after=f.to_dict())
             self._save()
+            self.version += 1
             return self._view(f)
 
     def delete(self, fid: str) -> dict:
@@ -174,6 +178,7 @@ class ViewerSession:
             self.fs.formulas.remove(f)
             self._log("delete", id=fid, before=f.to_dict())
             self._save()
+            self.version += 1
             return {"deleted": fid}
 
     def crop(self, fid: str, dpi: int = 200) -> bytes:
@@ -182,13 +187,15 @@ class ViewerSession:
             return crop_png(self._page(f.page), f.rect, dpi=dpi)
 
     def recognize(self, fid: str) -> dict:
+        with self.lock:  # 文書への描画だけを排他し、認識中も画面の操作を止めない
+            f = self._get(fid)
+            png = crop_png(self._page(f.page), f.rect, dpi=200)
+        try:
+            res = recognize_png(self.backend, png, dpi=200)
+        except RecognizerUnavailable as e:
+            raise SessionError(str(e), 503)
         with self.lock:
             f = self._get(fid)
-            page, rect = self._page(f.page), f.rect
-            try:
-                res = recognize_region(self.backend, page, rect, dpi=200)
-            except RecognizerUnavailable as e:
-                raise SessionError(str(e), 503)
             before = f.to_dict()
             if res.latex is None:
                 f.reason = f"recognition_failed: {res.error or 'no output'}"
@@ -197,7 +204,7 @@ class ViewerSession:
                 f.latex = res.latex  # 表示用の記法を除いた版
                 f.edited = False
                 f.confidence = res.confidence
-                f.source = getattr(self.backend, "name", "unknown")
+                f.source = getattr(self.backend, "name", "unknown") if f.source != "mfd" else "mfd+" + getattr(self.backend, "name", "?")
                 f.reason = f"partial: {res.error}" if res.error else None
                 if f.status == "excluded":
                     f.status = "pending"
@@ -205,7 +212,95 @@ class ViewerSession:
                       version=getattr(self.backend, "version", "?"), lines=getattr(res, "lines", 1),
                       before=before, after=f.to_dict())
             self._save()
+            self.version += 1
             return self._view(f)
+
+    # ---- 自動認識（開いた時点で全ページを検出・認識する） ----
+    def auto_status(self) -> dict:
+        with self.lock:
+            return dict(self.auto, version=self.version)
+
+    def start_auto(self, detector=None) -> dict:
+        with self.lock:
+            if self.auto.get("state") == "running":
+                return dict(self.auto)
+            if self.backend_name in (None, "", "none") and self._backend is None:
+                raise SessionError("認識バックエンドがない（--backend unimernet で起動）", 409)
+            self.auto = {"state": "running", "phase": "detect", "page": 0, "pages": self.doc.page_count,
+                         "found": 0, "recognized": 0, "error": None}
+        t = threading.Thread(target=self._auto_run, args=(detector,), daemon=True)
+        t.start()
+        return dict(self.auto)
+
+    def _auto_run(self, detector):
+        from ..detect.mfd import MFDDetector, detect_page
+
+        own = detector is None
+        det = detector or MFDDetector()
+        doc = pymupdf.open(self.input)  # このスレッド専用（PyMuPDF の文書はスレッド間で共有しない）
+        try:
+            done_pages = set(self.fs.meta.get("auto_pages", []))
+            new_ids: list[str] = []
+            for pno in range(doc.page_count):
+                with self.lock:
+                    self.auto.update(phase="detect", page=pno + 1)
+                if pno in done_pages:
+                    continue
+                found = detect_page(det, doc[pno])
+                with self.lock:
+                    n = 0
+                    for d in found:
+                        # 既にある枠（手で描いた枠を含む）と重なるものは追加しない
+                        if any(g.page == pno and (iou(g.rect, d["rect"]) > 0.5 or _contained(d["rect"], g.rect) > 0.8)
+                               for g in self.fs.formulas):
+                            continue
+                        n += 1
+                        fid = f"auto_p{pno}_{n}"
+                        while any(g.id == fid for g in self.fs.formulas):
+                            n += 1
+                            fid = f"auto_p{pno}_{n}"
+                        self.fs.formulas.append(Formula(id=fid, page=pno, rect=tuple(d["rect"]), source="mfd",
+                                                        kind=d["kind"], confidence=d["conf"], status="pending"))
+                        new_ids.append(fid)
+                    self.fs.meta.setdefault("auto_pages", []).append(pno)
+                    self.fs.meta["detector"] = {"name": "PDF-Extract-Kit MFD yolo_v8_ft", **det.info.get("versions", {})}
+                    self.auto["found"] += n
+                    self._log("detect", page=pno, added=n)
+                    self._save()
+                    self.version += 1
+            if own:
+                det.close()
+            # 未認識の枠を認識する（自動で見つけた枠を上から順に）
+            with self.lock:
+                todo = [f.id for f in self.fs.formulas if f.latex is None and f.status != "excluded"]
+                self.auto.update(phase="recognize", total=len(todo))
+            for fid in todo:
+                with self.lock:
+                    f = next((g for g in self.fs.formulas if g.id == fid), None)
+                    if f is None or f.latex is not None:
+                        continue
+                    png = crop_png(doc[f.page], f.rect, dpi=200)
+                    split = f.kind != "inline"
+                res = recognize_png(self.backend, png, dpi=200, split=split)
+                with self.lock:
+                    f = next((g for g in self.fs.formulas if g.id == fid), None)
+                    if f is not None and f.latex is None:
+                        if res.latex:
+                            f.ocr_latex = getattr(res, "raw", None) or res.latex
+                            f.latex = res.latex
+                            f.source = "mfd+" + getattr(self.backend, "name", "?")
+                        else:
+                            f.reason = f"recognition_failed: {res.error}"
+                        self._save()
+                        self.version += 1
+                    self.auto["recognized"] += 1
+            with self.lock:
+                self.auto.update(state="done", phase="done")
+        except Exception as e:  # 失敗は画面に表示し、途中までの結果は残す
+            with self.lock:
+                self.auto.update(state="error", error=f"{type(e).__name__}: {e}")
+        finally:
+            doc.close()
 
     def export(self, mode: str = "invisible", only_confirmed: bool = False) -> dict:
         with self.lock:
@@ -230,6 +325,13 @@ class ViewerSession:
 
     def close(self):
         self.doc.close()
+
+
+def _contained(inner, outer) -> float:
+    ix = max(0.0, min(inner[2], outer[2]) - max(inner[0], outer[0]))
+    iy = max(0.0, min(inner[3], outer[3]) - max(inner[1], outer[1]))
+    a = (inner[2] - inner[0]) * (inner[3] - inner[1])
+    return ix * iy / a if a > 0 else 0.0
 
 
 def valid_id(s: str) -> bool:

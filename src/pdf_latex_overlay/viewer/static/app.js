@@ -112,6 +112,11 @@ async function showDetail(f) {
   catch (e) { $("crop").removeAttribute("src"); }
 }
 
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast("LaTeX をコピーしました"); }
+  catch (e) { toast("コピーできませんでした（ブラウザの許可を確認）", 4000); }
+}
+
 async function copyLatex() {
   const text = $("latex").value;
   if (!text) { toast("コピーする LaTeX がありません"); return; }
@@ -145,7 +150,11 @@ function attachDraw(div, pno) {
   window.addEventListener("mouseup", async (ev) => {
     if (!start) return;
     const s0 = start; start = null;
-    if (!moved) { if (hitId) select(hitId); return; }
+    if (!moved) {
+      // Mathpix Snip のように: 枠をクリックしたら、その式の LaTeX をすぐコピーする
+      if (hitId) { select(hitId); const f = state.formulas.find((x) => x.id === hitId); if (f && f.latex) copyText(f.latex); }
+      return;
+    }
     const [x, y] = pos(ev), s = pageScale(div);
     if (rubber) { rubber.remove(); rubber = null; }
     const vr = [Math.min(x, s0[0]) / s, Math.min(y, s0[1]) / s, Math.max(x, s0[0]) / s, Math.max(y, s0[1]) / s];
@@ -177,6 +186,7 @@ function wire() {
     const id = state.selected; state.selected = null;
     act(() => api("DELETE", `/api/formulas/${encodeURIComponent(id)}`), "削除しました");
   };
+  $("autorun").onclick = () => act(() => api("POST", "/api/auto"), "全ページの認識を始めました");
   $("export").onclick = async () => {
     $("export").disabled = true; toast("派生PDFを作成・検証しています…", 60000);
     try {
@@ -194,5 +204,25 @@ function wire() {
   });
 }
 
+let lastVersion = -1;
+async function pollAuto() {
+  try {
+    const a = await api("GET", "/api/auto");
+    const el = $("autostat");
+    if (a.state === "running") {
+      el.textContent = a.phase === "detect" ? `数式を検出中… ${a.page}/${a.pages} ページ`
+        : `認識中… ${a.recognized}/${a.total || 0}`;
+    } else if (a.state === "done") {
+      el.textContent = "認識済み";
+    } else if (a.state === "error") {
+      el.textContent = `自動認識に失敗: ${a.error}`;
+    } else {
+      el.textContent = "";
+    }
+    if (a.version !== lastVersion) { lastVersion = a.version; await refresh(); }
+    setTimeout(pollAuto, a.state === "running" ? 1500 : 5000);
+  } catch (e) { setTimeout(pollAuto, 5000); }
+}
+
 wire();
-load().catch((e) => toast(`読み込みに失敗: ${e.message}`, 6000));
+load().then(pollAuto).catch((e) => toast(`読み込みに失敗: ${e.message}`, 6000));

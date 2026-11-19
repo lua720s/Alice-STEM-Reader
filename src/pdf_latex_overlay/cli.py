@@ -78,7 +78,7 @@ def cmd_viewer(a) -> int:
     from .viewer.server import serve
 
     return serve(a.input, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
-                 backend=a.backend, workdir=a.workdir)
+                 backend=a.backend, workdir=a.workdir, auto=not a.no_auto)
 
 
 def cmd_recognize(a) -> int:
@@ -127,6 +127,45 @@ def cmd_verify_derived(a) -> int:
     return 0 if ok else ExitCode.VERIFY_FAILED
 
 
+def cmd_detect(a) -> int:
+    """全ページの数式を自動検出し（必要なら認識し）、式 JSON に書く。"""
+    import pymupdf
+
+    from . import safety
+    from .detect.mfd import MFDDetector, detect_page
+    from .models import Formula, FormulaSet
+    from .recognize import RecognizerUnavailable
+
+    if Path(a.out).exists():
+        print(f"出力先が既に存在する: {a.out}", file=sys.stderr)
+        return ExitCode.SAFETY
+    flag = StopFlag().install()
+    det = MFDDetector()
+    fs = FormulaSet(input_sha256=safety.sha256_file(a.input), meta={"detector": "PDF-Extract-Kit MFD yolo_v8_ft"})
+    doc = pymupdf.open(a.input)
+    try:
+        for pno in range(doc.page_count):
+            if flag():
+                return ExitCode.INTERRUPTED
+            for n, d in enumerate(detect_page(det, doc[pno]), 1):
+                fs.formulas.append(Formula(id=f"auto_p{pno}_{n}", page=pno, rect=tuple(d["rect"]), source="mfd",
+                                           kind=d["kind"], confidence=d["conf"]))
+    except RecognizerUnavailable as e:
+        print(str(e), file=sys.stderr)
+        return 8
+    finally:
+        det.close()
+        doc.close()
+    fs.save(a.out)
+    _print({"formulas": len(fs.formulas), "out": a.out})
+    if a.recognize:
+        from .recognize import run_recognition
+
+        out2 = str(Path(a.out).with_suffix(".recognized.json"))
+        return run_recognition(a.input, a.out, out2, backend="unimernet", should_stop=flag)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pdf-latex-overlay", description="数式をLaTeXとしてコピーできる派生PDFを作る")
     p.add_argument("--version", action="version", version=__version__)
@@ -162,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--port", type=int, default=0)
     v.add_argument("--backend", default="none", help="再認識のバックエンド（none / unimernet）")
     v.add_argument("--no-open", action="store_true")
+    v.add_argument("--no-auto", action="store_true", help="開いた時点での全ページ自動認識をしない")
     v.set_defaults(func=cmd_viewer)
 
     r = sub.add_parser("recognize", help="式の矩形を切り出して LaTeX を認識する")
@@ -181,6 +221,12 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--frame", choices=["auto", "rendered", "unrotated"], default="auto",
                    help="MinerU の座標の基準ページ（既定 auto: 表示どおり）")
     m.set_defaults(func=cmd_import_mineru)
+    dt = sub.add_parser("detect", help="全ページの数式を自動検出する（MFD）")
+    dt.add_argument("input")
+    dt.add_argument("--out", required=True)
+    dt.add_argument("--recognize", action="store_true", help="続けて UniMERNet で認識する")
+    dt.set_defaults(func=cmd_detect)
+
     mp = sub.add_parser("mathpix-plan", help="Mathpix の A/B 検証4ジョブを計画する（送信しない）")
     mp.add_argument("fixtures_dir")
     mp.add_argument("--out-dir", default="outputs/mathpix")

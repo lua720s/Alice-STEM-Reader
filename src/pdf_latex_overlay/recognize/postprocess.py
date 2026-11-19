@@ -49,9 +49,9 @@ def erase_edge_rules(a: np.ndarray, dpi: int, ink: int = 170, edge: float = 0.08
 
 
 
-def split_lines(png: bytes, dpi: int, min_gap_pt: float = 2.5, min_line_pt: float = 6.0,
-                ink: int = 170) -> list[bytes]:
-    """行間の空白で画像を分ける。分けられなければ元の画像1枚を返す。
+def line_segments(png: bytes, dpi: int, min_gap_pt: float = 2.5, min_line_pt: float = 6.0,
+                  ink: int = 170):
+    """行の上下位置（ピクセル、[start, end)）と、罫線を消した画像を返す。行がなければ空のリスト。
 
     - min_gap_pt 以上の空白行（インクのない横帯）で区切る。分数の線と分子・分母の間は通常これより狭い。
     - 高さが min_line_pt 未満の断片（積分の上端・下端、波線など）は、近い方の行に戻す。
@@ -87,7 +87,7 @@ def split_lines(png: bytes, dpi: int, min_gap_pt: float = 2.5, min_line_pt: floa
         segs.append([start, end])
     # 枠の上下の端に触れている低い断片は、隣の行の一部が枠で切れたものなので捨てる
     if not segs:  # インクのない（白紙の）枠
-        return [png]
+        return img, []
     dark_all = a < ink
 
     def ink_width(sg):
@@ -105,16 +105,7 @@ def split_lines(png: bytes, dpi: int, min_gap_pt: float = 2.5, min_line_pt: floa
     segs = [sg for sg in segs
             if not ((is_fragment(sg) or (sg[1] - sg[0]) < 0.6 * tallest) and (sg[0] == 0 or sg[1] >= n))] or segs
     if len(segs) == 1:
-        s0, e0 = segs[0]
-        if s0 > 0 or e0 < n:  # 端の断片を除いた1行に詰める
-            pad = max(2, int(round(1.5 * px)))
-            crop = img.crop((0, max(0, s0 - pad), img.width, min(img.height, e0 + pad)))
-            buf = io.BytesIO()
-            crop.convert("RGB").save(buf, format="PNG")
-            return [buf.getvalue()]
-        return [png]
-    if len(segs) <= 1:
-        return [png]
+        return img, segs
     # 低い断片を近い行へ併合
     changed = True
     while changed and len(segs) > 1:
@@ -133,12 +124,26 @@ def split_lines(png: bytes, dpi: int, min_gap_pt: float = 2.5, min_line_pt: floa
             del segs[hi]
             changed = True
             break
-    if len(segs) <= 1:
+    return img, segs
+
+
+def split_lines(png: bytes, dpi: int, **kw) -> list[bytes]:
+    """行間の空白で画像を分ける。分けられなければ元の画像1枚を返す。
+
+    - 2.5pt 以上の空白行（インクのない横帯）で区切る。分数の線と分子・分母の間は通常これより狭い。
+    - 低い断片・幅の狭い断片（積分の上端・下端、波線など）は、近い方の行に戻す。
+    - 枠の端で切れた隣の行の断片は捨てる。
+    """
+    img, segs = line_segments(png, dpi, **kw)
+    if not segs:
         return [png]
+    px = dpi / 72.0
     pad = max(2, int(round(1.5 * px)))
+    if len(segs) == 1 and segs[0][0] == 0 and segs[0][1] >= img.height:
+        return [png]
     out = []
-    for s, e in segs:
-        crop = img.crop((0, max(0, s - pad), img.width, min(img.height, e + pad)))
+    for s0, e0 in segs:
+        crop = img.crop((0, max(0, s0 - pad), img.width, min(img.height, e0 + pad)))
         buf = io.BytesIO()
         crop.convert("RGB").save(buf, format="PNG")
         out.append(buf.getvalue())
