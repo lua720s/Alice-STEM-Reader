@@ -155,3 +155,30 @@ def test_launch_dialog_offers_pdf_and_folder():
     assert "choose folder" in src and '"PDFを選ぶ"' in src and '"フォルダを選ぶ"' in src
     assert "(" not in src.split("buttons", 1)[1].split("default button", 1)[0]  # 括弧が混ざっていない（f-string の波括弧の取り違え）
     assert "app-open --folder" not in src and '" --folder "' in src
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("osascript"), reason="macOS のみ")
+@pytest.mark.parametrize("choice,expect", [("PDFを選ぶ", ["a.pdf", "b.pdf"]), ("フォルダを選ぶ", ["--folder"])])
+def test_launch_script_branches_run_without_applescript_errors(fx, tmp_path, choice, expect):
+    """ダイアログだけ置き換えて、実際に AppleScript を実行する（予約語の変数名などの実行時エラーを検出する）。"""
+    from pdf_latex_overlay.appbuild import applescript
+
+    a, b = _pdf(fx, tmp_path, "a.pdf"), _pdf(fx, tmp_path, "b.pdf")
+    out = []
+    for line in applescript("/usr/bin/true", "/dev/null").split("\n"):
+        if "set rc to do shell script" in line:
+            line = '\tset rc to "1"'
+        if line.strip().startswith("set lastF to do shell script"):
+            line = '\t\tset lastF to ""'
+        if "display dialog" in line:
+            line = f'\tset choice to "{choice}"'
+        if "set picked to choose file" in line:
+            line = f'\t\t\tset picked to {{POSIX file "{a}" as alias, POSIX file "{b}" as alias}}'
+        if "set f to choose folder" in line:
+            line = f'\t\t\tset f to POSIX file "{tmp_path}" as alias'
+        out.append(line)
+    script = tmp_path / "stub.applescript"
+    script.write_text("\n".join(out).replace("my startViewer(", "return ("), encoding="utf-8")
+    r = subprocess.run(["osascript", str(script)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert all(e in r.stdout for e in expect), r.stdout

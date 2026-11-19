@@ -41,9 +41,9 @@ on run
 		set lastF to do shell script (my buildCmd("app-open --print-last") & " 2>/dev/null")
 	end try
 	-- PDF を直接選ぶか、フォルダを選ぶか
-	set kind to button returned of (display dialog "開くものを選んでください" buttons {{"キャンセル", "フォルダを選ぶ", "PDFを選ぶ"}} default button "PDFを選ぶ" cancel button "キャンセル" with title "PDF LaTeX Overlay")
+	set choice to button returned of (display dialog "開くものを選んでください" buttons {{"キャンセル", "フォルダを選ぶ", "PDFを選ぶ"}} default button "PDFを選ぶ" cancel button "キャンセル" with title "PDF LaTeX Overlay")
 	try
-		if kind is "PDFを選ぶ" then
+		if choice is "PDFを選ぶ" then
 			if lastF is not "" then
 				set picked to choose file of type {{"com.adobe.pdf"}} with prompt "PDFを選んでください（複数可）" default location (POSIX file lastF as alias) with multiple selections allowed
 			else
