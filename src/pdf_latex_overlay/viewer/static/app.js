@@ -188,8 +188,31 @@ async function refresh() {
   state.formulas = d.formulas;
   drawBoxes();
   const n = state.formulas.length, conf = state.formulas.filter((f) => f.status === "confirmed").length;
-  $("stats").textContent = `式 ${n} 件・確定 ${conf} 件`;
+  $("stats").textContent = `式 ${n} 件・確定 ${conf} 件${state.doc.verify ? "・2モデルで検証" : ""}`;
+  const rv = reviewList().length;
+  $("reviewbtn").hidden = rv === 0; $("reviewcount").textContent = String(rv);
   if (state.selected) showDetail(state.formulas.find((f) => f.id === state.selected));
+}
+
+// ---- 要確認（2つのモデルの読み取りが食い違った式）
+const reviewList = () => state.formulas.filter((f) => f.review && f.status !== "excluded" && f.view_rect)
+  .sort((a, b) => a.page - b.page || a.view_rect[1] - b.view_rect[1] || a.view_rect[0] - b.view_rect[0]);
+const REVIEW_WHY = {
+  disagree: "2つのモデルの読み取りが食い違っています。元の画像と見比べて確認してください。",
+  failed: "どちらかのモデルが読み取れませんでした。確認してください。",
+};
+function nextReview(dir = 1) {
+  const list = reviewList();
+  if (!list.length) { toast("要確認の式はありません"); return; }
+  const cur = list.findIndex((f) => f.id === state.selected);
+  let i;
+  if (cur >= 0) i = (cur + dir + list.length) % list.length;
+  else i = dir > 0 ? Math.max(0, list.findIndex((f) => f.page > state.cur || (f.page === state.cur))) : list.length - 1;
+  const f = list[i];
+  if (f.page !== state.cur) goto(f.page);
+  select(f.id);
+  setTimeout(() => { const b = document.querySelector(`.box[data-id="${CSS.escape(f.id)}"]`); if (b) b.scrollIntoView({ block: "nearest", inline: "nearest" }); }, 60);
+  toast(`要確認 ${i + 1} / ${list.length}`, 1200);
 }
 
 function pageScale(div) { const p = state.doc.pages[+div.dataset.page]; return div.clientWidth / p.width; }
@@ -202,7 +225,7 @@ function drawBoxes() {
     for (const f of state.formulas.filter((x) => x.page === pno && x.view_rect)) {
       const [x0, y0, x1, y1] = f.view_rect;
       const b = document.createElement("div");
-      b.className = `box ${f.status}${f.edited ? " edited" : ""}${f.id === state.selected ? " selected" : ""}`;
+      b.className = `box ${f.status}${f.edited ? " edited" : ""}${f.review ? " review" : ""}${f.id === state.selected ? " selected" : ""}`;
       Object.assign(b.style, { left: `${x0 * s}px`, top: `${y0 * s}px`, width: `${(x1 - x0) * s}px`, height: `${(y1 - y0) * s}px` });
       b.title = f.latex || "(LaTeX なし)";
       b.dataset.id = f.id;
@@ -220,8 +243,9 @@ function select(id) {
   showDetail(state.formulas.find((f) => f.id === id));
 }
 
-function renderPreview(latex) {
-  const el = $("preview"); el.textContent = "";
+function renderPreview(latex) { renderPreviewInto($("preview"), latex); }
+function renderPreviewInto(el, latex) {
+  el.textContent = "";
   if (!latex) { el.textContent = "（LaTeX なし）"; return; }
   if (window.katex) {
     const lines = latex.split("\n").filter((x) => x.trim());
@@ -242,6 +266,13 @@ async function showDetail(f) {
   $("ocr").textContent = f.ocr_latex || "（OCR 原文なし）";
   $("reason").textContent = f.reason ? `理由: ${f.reason}` : "";
   renderPreview($("latex").value);
+  const alt = $("altbox"); alt.hidden = !f.review;
+  if (f.review) {
+    $("altwhy").textContent = ` ${REVIEW_WHY[f.review] || ""}`;
+    $("alttext").value = f.alt_latex || "";
+    $("usealt").disabled = !f.alt_latex;
+    renderPreviewInto($("altpreview"), f.alt_latex);
+  }
   try { const blob = await api("GET", `/api/formulas/${encodeURIComponent(f.id)}/crop.png`); $("crop").src = URL.createObjectURL(blob); }
   catch (e) { $("crop").removeAttribute("src"); }
 }
@@ -445,9 +476,10 @@ function makeRow(node, key, depth, isFolder, open, label, anc = false) {
     return row;
   }
   const dot = document.createElement("span"); dot.className = `dot ${node.state}`;
-  if (node.formulas != null) meta.textContent = `式 ${node.formulas}`;
+  if (node.formulas != null) meta.textContent = `式 ${node.formulas}${node.review ? `・要確認 ${node.review}` : ""}`;
+  if (node.review) meta.classList.add("has-review");
   row.append(meta, dot);
-  row.title = `${node.name}\n${STATE_TEXT[node.state] || ""}${node.pages ? `・${node.pages} ページ` : ""}`;
+  row.title = `${node.name}\n${STATE_TEXT[node.state] || ""}${node.pages ? `・${node.pages} ページ` : ""}${node.review ? `・要確認 ${node.review} 件` : ""}`;
   row.addEventListener("click", onClick);
   return row;
 }
@@ -864,6 +896,11 @@ function wire() {
     const n = state.cur;
     act(() => api("POST", "/api/auto", { pages: [n], force: true }), `${n + 1} ページ目の認識を始めました`);
   };
+  $("reviewbtn").onclick = () => nextReview(1);
+  $("usealt").onclick = () => {
+    const f = state.formulas.find((x) => x.id === state.selected);
+    if (f && f.alt_latex) act(() => api("POST", `/api/formulas/${encodeURIComponent(f.id)}`, { latex: f.alt_latex }), "もう一方の読み取りを採用しました");
+  };
   $("doc-menu").onclick = () => menuAt($("doc-menu"), state.docId ? menuItemsFor(state.docId) : []);
   $("tree-newfolder").onclick = () => actNewFolder(defaultFolderKey());
   $("tree-select").onclick = () => setSelectMode(!tree.selectMode);
@@ -906,6 +943,7 @@ function wire() {
       case "b": setSidebar(!$("layout").classList.contains("sb-open"), true); break;
       case "/": $("tree-filter").focus(); $("tree-filter").select(); break;
       case "c": if (state.selected) copyLatex(); else handled = false; break;
+      case "n": case "N": nextReview(ev.shiftKey || ev.key === "N" ? -1 : 1); break;
       default: handled = false;
     }
     if (handled) ev.preventDefault();

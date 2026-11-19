@@ -34,7 +34,7 @@ def _digest(d) -> str:
 
 
 def run_recognition(input_path, formulas_path, out_path, backend="unimernet", workdir=None, dpi=200,
-                    only_missing=True, should_stop=lambda: False, backend_obj=None, log=None) -> int:
+                    only_missing=True, should_stop=lambda: False, backend_obj=None, log=None, verifier_obj=None) -> int:
     log = log or (lambda *a: print(*a, file=sys.stderr))
     inp, out = Path(input_path), Path(out_path)
     if not inp.is_file():
@@ -94,9 +94,10 @@ def run_recognition(input_path, formulas_path, out_path, backend="unimernet", wo
                 interrupted = True
                 break
             t0 = time.monotonic()
-            res = recognize_region(be, doc[f.page], f.rect, dpi=dpi, split=f.kind != "inline")
+            res = recognize_region(be, doc[f.page], f.rect, dpi=dpi, split=f.kind != "inline", verifier=verifier_obj)
             state["done"][f.id] = {
                 "latex": res.latex, "raw": getattr(res, "raw", res.latex), "error": res.error,
+                "alt": getattr(res, "alt", None), "review": getattr(res, "review", None),
                 "elapsed_s": round(time.monotonic() - t0, 3),
             }
             save_state()
@@ -116,6 +117,7 @@ def run_recognition(input_path, formulas_path, out_path, backend="unimernet", wo
             failed += 1
         else:
             f.ocr_latex, f.latex = d["raw"], d["latex"]
+            f.alt_latex, f.review = d.get("alt"), d.get("review")
             f.source, f.confidence, f.edited = backend, None, False
             f.status, f.reason = "pending", None
     fs.input_sha256 = sha

@@ -29,6 +29,8 @@ class Formula:
     status: str = "pending"  # pending / confirmed / excluded / error / embedded
     reason: str | None = None  # 除外・エラー理由
     edited: bool = False
+    alt_latex: str | None = None  # もう一方のモデル（検証用）の読み取り
+    review: str | None = None  # 要確認の理由: disagree（2つのモデルが食い違う）/ failed（どちらかが読めない）。確定・修正で消える
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

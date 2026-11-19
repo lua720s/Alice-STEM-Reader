@@ -78,15 +78,29 @@ def cmd_viewer(a) -> int:
     from .viewer.server import serve
 
     return serve(a.paths, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
-                 backend=a.backend, workdir=a.workdir, auto=not a.no_auto, readonly=a.readonly)
+                 backend=a.backend, workdir=a.workdir, auto=not a.no_auto, readonly=a.readonly, verify=a.verify)
 
 
 def cmd_recognize(a) -> int:
     from .recognize import run_recognition
 
     flag = StopFlag().install()
-    return run_recognition(a.input, a.formulas, a.out, backend=a.backend, workdir=a.workdir,
-                           dpi=a.dpi, only_missing=not a.all, should_stop=flag)
+    ver = None
+    if a.verify:
+        from .recognize import RecognizerUnavailable
+        from .recognize.unimernet import make_verifier
+
+        try:
+            ver = make_verifier()
+        except RecognizerUnavailable as e:
+            print(str(e), file=sys.stderr)
+            return 8
+    try:
+        return run_recognition(a.input, a.formulas, a.out, backend=a.backend, workdir=a.workdir,
+                               dpi=a.dpi, only_missing=not a.all, should_stop=flag, verifier_obj=ver)
+    finally:
+        if ver is not None:
+            ver.close()
 
 
 def cmd_import_mineru(a) -> int:
@@ -184,7 +198,15 @@ def cmd_prepare(a) -> int:
     def stop():
         return flag() or (a.time_limit is not None and time.monotonic() - t0 > a.time_limit)
 
-    det, be = MFDDetector(), get_backend("unimernet")
+    det, be, ver = MFDDetector(), get_backend("unimernet"), None
+    if a.verify:
+        from .recognize.unimernet import make_verifier
+
+        try:
+            ver = make_verifier()
+        except RecognizerUnavailable as e:
+            print(str(e), file=sys.stderr)
+            return PrepareExit.MODEL_MISSING
     results = []
     try:
         for i, pdf in enumerate(pdfs, 1):
@@ -193,7 +215,8 @@ def cmd_prepare(a) -> int:
                 continue
             print(f"[{i}/{len(pdfs)}] {pdf.name}", file=sys.stderr, flush=True)
             results.append(prepare_one(pdf, detector=det, backend=be, library=a.library, should_stop=stop,
-                                       max_pages=a.max_pages, log=lambda m: print(m, file=sys.stderr, flush=True)))
+                                       max_pages=a.max_pages, log=lambda m: print(m, file=sys.stderr, flush=True),
+                                       verifier=ver))
     except RecognizerUnavailable as e:
         print(str(e), file=sys.stderr)
         return PrepareExit.MODEL_MISSING
@@ -201,6 +224,8 @@ def cmd_prepare(a) -> int:
         det.close()
         if hasattr(be, "close"):
             be.close()
+        if ver is not None:
+            ver.close()
     _print({"elapsed_s": round(time.monotonic() - t0, 1), "results": results})
     states = {r.get("meta_state", r["state"]) for r in results}
     if stop() or "interrupted" in states or "not_started" in states:
@@ -254,6 +279,8 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--no-open", action="store_true")
     v.add_argument("--no-auto", action="store_true", help="開いた時点での全ページ自動認識をしない")
     v.add_argument("--readonly", action="store_true", help="名前の変更・移動・削除・フォルダ作成を受け付けない")
+    v.add_argument("--verify", action="store_true",
+                   help="2つ目のモデル（既定 models/unimernet_base）でも読み、食い違った式に「要確認」の印を付ける（約3倍遅い）")
     v.set_defaults(func=cmd_viewer)
 
     r = sub.add_parser("recognize", help="式の矩形を切り出して LaTeX を認識する")
@@ -264,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--workdir", default=None)
     r.add_argument("--dpi", type=int, default=200)
     r.add_argument("--all", action="store_true", help="LaTeX が既にある式も再認識する")
+    r.add_argument("--verify", action="store_true", help="2つ目のモデルでも読み、食い違った式に「要確認」の印を付ける")
     r.set_defaults(func=cmd_recognize)
 
     m = sub.add_parser("import-mineru", help="MinerU の結果 JSON から式 JSON を作る")
@@ -279,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--no-recursive", action="store_true")
     pr.add_argument("--max-pages", type=int, default=None, help="1つの PDF で処理する最大ページ数")
     pr.add_argument("--time-limit", type=float, default=None, help="全体の上限（秒）。超えたら区切りのよいところで止める")
+    pr.add_argument("--verify", action="store_true", help="2つ目のモデルでも読み、食い違った式に「要確認」の印を付ける（約3倍遅い）")
     pr.set_defaults(func=cmd_prepare)
 
     lb = sub.add_parser("library", help="事前処理した PDF の一覧")

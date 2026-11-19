@@ -35,7 +35,7 @@ class SessionError(Exception):
 
 
 class ViewerSession:
-    def __init__(self, input_path, workdir, formulas_path=None, backend="none", backend_obj=None, detector_obj=None):
+    def __init__(self, input_path, workdir, formulas_path=None, backend="none", backend_obj=None, detector_obj=None, verifier_obj=None):
         self.input = Path(input_path).resolve()
         if not self.input.is_file():
             raise SessionError(f"入力PDFがない: {self.input}", 404)
@@ -49,6 +49,7 @@ class ViewerSession:
         self.backend_name = backend
         self._backend = backend_obj
         self._detector = detector_obj  # Hub が持つ検出器を使い回す（PDF を切り替えても読み込み直さない）
+        self._verifier = verifier_obj  # 2つ目のモデル。あれば、食い違った式に「要確認」の印を付ける
         self._stop = threading.Event()
         self._auto_thread: threading.Thread | None = None
         self.auto: dict = {"state": "idle"}
@@ -122,6 +123,7 @@ class ViewerSession:
             "sha256": self.input_sha,
             "pages": [{"width": p.rect.width, "height": p.rect.height, "rotation": p.rotation} for p in self.doc],
             "backend": self.backend_name,
+            "verify": self._verifier is not None,
             "workdir": str(self.workdir),
         }
 
@@ -177,6 +179,8 @@ class ViewerSession:
                 f.reason = (reason or "user") if status == "excluded" else None
             if view_rect is not None:
                 f.rect = self._to_stored(f.page, view_rect)
+            if latex is not None or status in ("confirmed", "excluded"):
+                f.review = None  # 人が確認・修正・除外したので、要確認の印は外す（もう一方の読みは残す）
             self._log("update", id=fid, before=before, after=f.to_dict())
             self._save()
             self.version += 1
@@ -203,12 +207,13 @@ class ViewerSession:
             f = self._get(fid)
             png = crop_png(self._page(f.page), f.rect, dpi=200)
         try:
-            res = recognize_png(self.backend, png, dpi=200)
+            res = recognize_png(self.backend, png, dpi=200, verifier=self._verifier)
         except RecognizerUnavailable as e:
             raise SessionError(str(e), 503)
         with self.lock:
             f = self._get(fid)
             before = f.to_dict()
+            f.alt_latex, f.review = getattr(res, "alt", None), getattr(res, "review", None)
             if res.latex is None:
                 f.reason = f"recognition_failed: {res.error or 'no output'}"
             else:
@@ -277,7 +282,7 @@ class ViewerSession:
         try:
             r = process_document(self.input, self.fs, detector=det, backend=self.backend, lock=self.lock,
                                  save=save, progress=progress, log=self._log, should_stop=self._stop.is_set,
-                                 only_pages=pages, force=force)
+                                 only_pages=pages, force=force, verifier=self._verifier)
             with self.lock:
                 self.auto.update(state="done" if r["state"] == "done" else "idle", phase="done", found=r["found"])
             self._update_meta("done" if r["state"] == "done" and pages is None else "partial")
@@ -295,7 +300,8 @@ class ViewerSession:
         try:
             with self.lock:
                 counts = {"formulas": len(self.fs.formulas), "with_latex": sum(1 for f in self.fs.formulas if f.latex),
-                          "failed": sum(1 for f in self.fs.formulas if f.latex is None and f.status != "excluded")}
+                          "failed": sum(1 for f in self.fs.formulas if f.latex is None and f.status != "excluded"),
+                          "review": sum(1 for f in self.fs.formulas if f.review and f.status != "excluded")}
             m = read_meta(self.workdir)
             if m.get("state") == "running":  # 事前処理が進めている間は、その状態を壊さない
                 return

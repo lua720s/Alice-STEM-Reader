@@ -161,3 +161,14 @@ class UniMERNetBackend:
             self.close()
         except Exception:
             pass
+
+
+def make_verifier(model_dir=None, **kw) -> "UniMERNetBackend":
+    """検証用（2つ目）のモデル。既定は models/unimernet_base（環境変数 PLO_VERIFY_DIR で変更）。
+
+    重みやML用Pythonがなければ、RecognizerUnavailable を出す（起動時に分かる）。
+    """
+    b = UniMERNetBackend(model_dir=model_dir or os.environ.get("PLO_VERIFY_DIR") or ROOT / "models" / "unimernet_base", **kw)
+    b._check()
+    return b
+

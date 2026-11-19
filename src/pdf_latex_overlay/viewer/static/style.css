@@ -149,6 +149,9 @@ main { display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns:
 .box:hover { background: rgba(33, 96, 196, .2); }
 .box.excluded { border-style: dashed; border-color: var(--muted); background: transparent; }
 .box.confirmed { border-color: var(--ok); }
+.box.review { border-color: var(--warn); border-style: dashed; background: rgba(224, 160, 60, .16); }
+.box.review::after { content: "!"; position: absolute; right: -8px; top: -8px; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--warn); color: #fff; font: 700 11px/15px sans-serif; text-align: center; }
 .box.selected { border-color: var(--sel); border-width: 2.5px; }
 .box.edited::after { content: "✎"; position: absolute; right: -10px; top: -12px; font-size: 11px; color: var(--warn); }
 .rubber { position: absolute; z-index: 200000; border: 1.5px dashed var(--sel); background: rgba(232, 89, 12, .08); pointer-events: none; }
@@ -220,6 +223,14 @@ button.danger-solid { background: var(--bad); border-color: var(--bad); color: #
 #conn { position: fixed; z-index: 90; top: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px;
   max-width: min(640px, calc(100vw - 24px)); padding: 10px 14px; border-radius: 10px; background: var(--bad); color: #fff; box-shadow: var(--shadow); font-size: 13px; }
 #conn button { flex: none; background: rgba(255, 255, 255, .18); border-color: rgba(255, 255, 255, .5); color: #fff; }
+
+.review-btn { padding: 2px 10px; font-size: 12px; border-color: var(--warn); color: var(--warn); border-radius: 12px; white-space: nowrap; flex: none; }
+.review-btn[hidden] { display: none; }
+.meta.has-review { color: var(--warn); }
+#altbox { margin: 8px 0 10px; padding: 8px 10px; border-left: 3px solid var(--warn); border-radius: 0 8px 8px 0; background: var(--active-bg); }
+#altbox[hidden] { display: none; }
+#altbox .alt-head { font-size: 13px; margin-bottom: 4px; }
+#altbox textarea { margin: 4px 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }

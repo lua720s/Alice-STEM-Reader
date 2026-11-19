@@ -131,7 +131,7 @@ def _contained(inner, outer) -> float:
 def process_document(pdf_path, fs: FormulaSet, *, detector, backend, lock=None,
                      save: Callable[[], None] = lambda: None, progress: Callable[..., None] = lambda **k: None,
                      log: Callable[..., None] = lambda *a, **k: None, should_stop: Callable[[], bool] = lambda: False,
-                     max_pages: int | None = None, only_pages=None, force: bool = False) -> dict:
+                     max_pages: int | None = None, only_pages=None, force: bool = False, verifier=None) -> dict:
     """未処理のページを検出し、未認識の枠を認識する。fs をその場で更新し、こまめに save() する。
 
     only_pages を渡すと、そのページだけを処理する（0 始まり）。force なら、処理済みのページでも検出し直す
@@ -197,10 +197,11 @@ def process_document(pdf_path, fs: FormulaSet, *, detector, backend, lock=None,
                     save()
                     continue
                 split = f.kind != "inline"
-            res = recognize_png(backend, png, dpi=200, split=split)
+            res = recognize_png(backend, png, dpi=200, split=split, verifier=verifier)
             with lk:
                 f = next((g for g in fs.formulas if g.id == fid), None)
                 if f is not None and f.latex is None:
+                    f.alt_latex, f.review = getattr(res, "alt", None), getattr(res, "review", None)
                     if res.latex:
                         f.ocr_latex = getattr(res, "raw", None) or res.latex
                         f.latex = res.latex
@@ -236,7 +237,7 @@ def collect_pdfs(paths, recursive=True) -> list[Path]:
 
 
 def prepare_one(pdf: Path, *, detector, backend, library=None, should_stop=lambda: False,
-                max_pages=None, log=print) -> dict:
+                max_pages=None, log=print, verifier=None) -> dict:
     """1つの PDF を事前処理する。原本は読むだけ。"""
     pf = pdfcheck.preflight(pdf)
     if not pf.ok:
@@ -279,7 +280,7 @@ def prepare_one(pdf: Path, *, detector, backend, library=None, should_stop=lambd
 
             try:
                 r = process_document(pdf, fs, detector=detector, backend=backend, save=save, progress=progress,
-                                     log=hist, should_stop=should_stop, max_pages=max_pages)
+                                     log=hist, should_stop=should_stop, max_pages=max_pages, verifier=verifier)
             except RecognizerUnavailable as e:
                 meta.update(state="error", error=str(e))
                 write_meta(d, meta)
@@ -294,7 +295,8 @@ def prepare_one(pdf: Path, *, detector, backend, library=None, should_stop=lambd
                         finished=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                         elapsed_s=round(meta.get("elapsed_s", 0) + elapsed, 1),  # 処理時間の累計（再開分を含む）
                         counts={"formulas": len(fs.formulas), "with_latex": sum(1 for f in fs.formulas if f.latex),
-                                "failed": sum(1 for f in fs.formulas if f.latex is None and f.status != "excluded")})
+                                "failed": sum(1 for f in fs.formulas if f.latex is None and f.status != "excluded"),
+                                "review": sum(1 for f in fs.formulas if f.review and f.status != "excluded")})
             meta.pop("error", None)
             write_meta(d, meta)
             return {"pdf": str(pdf), "entry": d.name, "elapsed_s": elapsed, **r, "meta_state": meta["state"]}

@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from ..recognize.base import RecognizerUnavailable
 from .hub import Hub
 from .session import SessionError, ViewerSession, valid_id
 
@@ -210,11 +211,14 @@ def make_server(target, port: int = 0):
 
 
 def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True,
-          readonly=False) -> int:
+          readonly=False, verify=False) -> int:
     """paths は PDF またはフォルダ（複数可）。フォルダなら左のコレクションに階層で並ぶ。"""
     paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
     try:
-        hub = Hub(paths, backend=backend, auto_on_open=False, readonly=readonly)
+        hub = Hub(paths, backend=backend, auto_on_open=False, readonly=readonly, verify=verify)
+    except RecognizerUnavailable as e:  # 検証用のモデルがない
+        print(str(e), file=sys.stderr)
+        return 8
     except SessionError as e:
         print(str(e), file=sys.stderr)
         return 2

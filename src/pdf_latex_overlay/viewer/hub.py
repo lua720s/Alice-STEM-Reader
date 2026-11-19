@@ -45,7 +45,7 @@ def file_id(path: Path) -> str:
 
 class Hub:
     def __init__(self, roots, backend="none", backend_obj=None, detector=None, library=None, auto_on_open=False,
-                 readonly=False, trash_dir=None):
+                 readonly=False, trash_dir=None, verify=False, verify_backend_obj=None):
         self.roots = [Path(r).resolve() for r in roots]
         for r in self.roots:
             if not r.exists():
@@ -61,6 +61,16 @@ class Hub:
             self.backend_obj = get_backend(backend)  # 読み込みは最初に認識するときまで遅らせる
             self.detector = detector or MFDDetector()
             self._own_models = True
+        # 2つ目のモデル（検証用）。あれば、2つの読み取りが食い違った式に「要確認」の印を付ける
+        self.verify_obj = verify_backend_obj
+        self._own_verify = False
+        if verify and self.verify_obj is None:
+            if backend in (None, "", "none"):
+                raise SessionError("--verify は、--backend unimernet と一緒に使う", 2)
+            from ..recognize.unimernet import make_verifier
+
+            self.verify_obj = make_verifier()  # 重みがなければ、RecognizerUnavailable（起動時に分かる）
+            self._own_verify = True
         self.library = Path(library) if library else None
         self.auto_on_open = auto_on_open
         self.readonly = readonly  # True なら、名前の変更・移動・削除・フォルダ作成を受け付けない
@@ -88,6 +98,7 @@ class Hub:
         h = cls([session.input], backend="none", backend_obj=session._backend, detector=session._detector,
                 library=session.workdir.parent)
         h.backend_name = session.backend_name  # 表示用（モデルはセッションが持つ）
+        h.verify_obj = session._verifier
         h.session = session
         h.current_id = file_id(session.input)
         h.index[h.current_id] = session.input
@@ -223,7 +234,7 @@ class Hub:
     def _file_node(self, path: Path) -> dict:
         fid = file_id(path)
         node = {"type": "file", "id": fid, "name": path.name, "state": "unknown", "formulas": None,
-                "with_latex": None, "pages": None}
+                "with_latex": None, "pages": None, "review": None}
         try:
             node["size"] = path.stat().st_size
         except OSError:
@@ -236,6 +247,7 @@ class Hub:
                              "interrupted": "partial"}.get(st, "none")
             c = m.get("counts") or {}
             node["formulas"], node["with_latex"], node["pages"] = c.get("formulas"), c.get("with_latex"), m.get("pages")
+            node["review"] = c.get("review")
         return node
 
     def tree(self, refresh: bool = False) -> dict:
@@ -279,7 +291,7 @@ class Hub:
             roots.append({"type": "folder", "name": "開いたPDF", "key": "files", "children": loose})
         return {"roots": roots, "current": self.current_id, "hashing": self.hashing_remaining(),
                 "truncated": truncated, "backend": self.backend_name, "files": len(files),
-                "readonly": self.readonly, "ocr": self.ocr_status()}
+                "readonly": self.readonly, "ocr": self.ocr_status(), "verify": self.verify_obj is not None}
 
     # ---------------------------------------------------------------- ファイル操作（名前の変更・移動・削除・フォルダ作成）
     def _check_fs(self):
@@ -505,7 +517,7 @@ class Hub:
                         item["reason"] = st.get("error")
                         continue
                     r = prepare_one(path, detector=self.detector, backend=self.backend_obj, library=self.library,
-                                    should_stop=lambda: job["cancel"], log=lambda *_: None)
+                                    should_stop=lambda: job["cancel"], log=lambda *_: None, verifier=self.verify_obj)
                     st = r.get("state")
                     if st == "done":
                         item.update(state="done", found=r.get("found", 0), recognized=r.get("recognized", 0),
@@ -596,7 +608,8 @@ class Hub:
             cm.__enter__()
             try:
                 session = ViewerSession(path, d, formulas_path, backend=self.backend_name,
-                                        backend_obj=self.backend_obj, detector_obj=self.detector)
+                                        backend_obj=self.backend_obj, detector_obj=self.detector,
+                                        verifier_obj=self.verify_obj)
             except BaseException:
                 cm.__exit__(None, None, None)
                 raise
@@ -626,7 +639,7 @@ class Hub:
             if self._lock_cm is not None or self.session is not None:
                 self._release()
             if self._own_models:
-                for m in (self.detector, self.backend_obj):
+                for m in (self.detector, self.backend_obj, self.verify_obj if self._own_verify else None):
                     if m is not None and hasattr(m, "close"):
                         try:
                             m.close()

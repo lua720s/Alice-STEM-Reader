@@ -12,8 +12,9 @@ import io
 import pymupdf
 from PIL import Image
 
-from .base import Recognition, crop_png
+from .base import Recognition, RecognizerUnavailable, crop_png
 from .postprocess import clean_latex, looks_degenerate, split_lines
+from .verify import review_flag
 
 RETRY_SCALES = (0.75, 1.3)
 
@@ -30,12 +31,30 @@ def _raw(r: Recognition) -> str | None:
     return getattr(r, "raw", None) or r.latex
 
 
-def recognize_region(backend, page: pymupdf.Page, rect, dpi: int = 200, split: bool = True) -> Recognition:
-    return recognize_png(backend, crop_png(page, rect, dpi=dpi), dpi=dpi, split=split)
+def recognize_region(backend, page: pymupdf.Page, rect, dpi: int = 200, split: bool = True, verifier=None) -> Recognition:
+    return recognize_png(backend, crop_png(page, rect, dpi=dpi), dpi=dpi, split=split, verifier=verifier)
 
 
-def recognize_png(backend, png: bytes, dpi: int = 200, split: bool = True) -> Recognition:
-    """切り出し済みの画像を認識する（ページ文書に触れないので、別スレッドから呼べる）。"""
+def recognize_png(backend, png: bytes, dpi: int = 200, split: bool = True, verifier=None) -> Recognition:
+    """切り出し済みの画像を認識する（ページ文書に触れないので、別スレッドから呼べる）。
+
+    verifier（もう一方のモデル）を渡すと、同じ画像を同じ手順で読み、結果が数学的に食い違ったら
+    out.review に理由を、out.alt にもう一方の読み取りを入れる（「要確認」の印）。
+    """
+    out = _read(backend, png, dpi, split)
+    if verifier is not None:
+        try:
+            alt = _read(verifier, png, dpi, split)
+        except RecognizerUnavailable:
+            raise
+        except Exception as e:  # 検証側の失敗で、主の結果を捨てない。要確認にする
+            alt = Recognition(latex=None, error=f"{type(e).__name__}: {e}")
+        out.alt = alt.latex  # type: ignore[attr-defined]
+        out.review = review_flag(out, alt)  # type: ignore[attr-defined]
+    return out
+
+
+def _read(backend, png: bytes, dpi: int, split: bool) -> Recognition:
     lines = split_lines(png, dpi) if split else [png]
     results = backend.recognize(lines)
     raws, cleans, problems = [], [], []
