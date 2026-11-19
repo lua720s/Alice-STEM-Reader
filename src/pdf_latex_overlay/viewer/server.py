@@ -146,8 +146,10 @@ def make_handler(session: ViewerSession, token: str, port_ref: dict):
 
 
 def default_workdir(input_path) -> Path:
-    h = hashlib.sha256(str(Path(input_path).resolve()).encode()).hexdigest()[:10]
-    return Path.cwd() / "runs" / f"viewer-{Path(input_path).stem}-{h}"
+    """PDF の中身のハッシュで引くライブラリの作業領域（prepare で事前処理した結果をそのまま使う）。"""
+    from ..prepare import entry_dir
+
+    return entry_dir(input_path)[0]
 
 
 def make_server(session: ViewerSession, port: int = 0):
@@ -159,7 +161,25 @@ def make_server(session: ViewerSession, port: int = 0):
 
 
 def serve(input_path, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True) -> int:
-    session = ViewerSession(input_path, workdir or default_workdir(input_path), formulas_path, backend=backend)
+    from ..prepare import hold_lock, lock_holder, read_meta, write_meta
+
+    wd = Path(workdir) if workdir else default_workdir(input_path)
+    wd.mkdir(parents=True, exist_ok=True)
+    other = lock_holder(wd / ".viewer.lock")
+    if other:
+        print(f"この PDF は別のビューア（pid {other}）で開かれている: {wd}", file=sys.stderr)
+        return 3
+    with hold_lock(wd / ".viewer.lock"):
+        return _serve(input_path, wd, formulas_path, port, open_browser, backend, auto, read_meta, write_meta)
+
+
+def _serve(input_path, wd, formulas_path, port, open_browser, backend, auto, read_meta, write_meta) -> int:
+    session = ViewerSession(input_path, wd, formulas_path, backend=backend)
+    meta = read_meta(wd)  # ライブラリの一覧に出るよう、元の名前とパスを記録
+    meta.setdefault("state", "viewer")
+    meta.update(name=Path(input_path).name, input_sha256=session.input_sha, pages=session.doc.page_count,
+                source_paths=list(dict.fromkeys([*meta.get("source_paths", []), str(Path(input_path).resolve())])))
+    write_meta(wd, meta)
     httpd, token = make_server(session, port)
     if auto and backend not in (None, "", "none"):
         session.start_auto()  # 開いた時点で全ページの数式を検出・認識する（裏で進め、画面は先に使える）

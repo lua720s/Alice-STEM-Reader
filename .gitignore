@@ -18,6 +18,7 @@
 __pycache__/
 build/
 dist/
+library/
 models/
 outputs/
 runs/

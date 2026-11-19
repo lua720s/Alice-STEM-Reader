@@ -166,6 +166,57 @@ def cmd_detect(a) -> int:
     return 0
 
 
+def cmd_prepare(a) -> int:
+    """開く前に、PDF（フォルダも可）の数式をまとめて検出・認識しておく。"""
+    import time
+
+    from .detect.mfd import MFDDetector
+    from .prepare import PrepareExit, collect_pdfs, prepare_one
+    from .recognize import RecognizerUnavailable, get_backend
+
+    pdfs = collect_pdfs(a.paths, recursive=not a.no_recursive)
+    if not pdfs:
+        print("PDF が見つからない", file=sys.stderr)
+        return PrepareExit.USAGE
+    flag = StopFlag().install()
+    t0 = time.monotonic()
+
+    def stop():
+        return flag() or (a.time_limit is not None and time.monotonic() - t0 > a.time_limit)
+
+    det, be = MFDDetector(), get_backend("unimernet")
+    results = []
+    try:
+        for i, pdf in enumerate(pdfs, 1):
+            if stop():
+                results.append({"pdf": str(pdf), "state": "not_started"})
+                continue
+            print(f"[{i}/{len(pdfs)}] {pdf.name}", file=sys.stderr, flush=True)
+            results.append(prepare_one(pdf, detector=det, backend=be, library=a.library, should_stop=stop,
+                                       max_pages=a.max_pages, log=lambda m: print(m, file=sys.stderr, flush=True)))
+    except RecognizerUnavailable as e:
+        print(str(e), file=sys.stderr)
+        return PrepareExit.MODEL_MISSING
+    finally:
+        det.close()
+        if hasattr(be, "close"):
+            be.close()
+    _print({"elapsed_s": round(time.monotonic() - t0, 1), "results": results})
+    states = {r.get("meta_state", r["state"]) for r in results}
+    if stop() or "interrupted" in states or "not_started" in states:
+        return PrepareExit.INTERRUPTED
+    if states & {"error", "partial"} or any(r.get("failed") for r in results):
+        return PrepareExit.PARTIAL
+    return PrepareExit.OK
+
+
+def cmd_library(a) -> int:
+    from .prepare import list_library
+
+    _print(list_library(a.library))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pdf-latex-overlay", description="数式をLaTeXとしてコピーできる派生PDFを作る")
     p.add_argument("--version", action="version", version=__version__)
@@ -221,6 +272,18 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--frame", choices=["auto", "rendered", "unrotated"], default="auto",
                    help="MinerU の座標の基準ページ（既定 auto: 表示どおり）")
     m.set_defaults(func=cmd_import_mineru)
+    pr = sub.add_parser("prepare", help="開く前に数式をまとめて検出・認識しておく（フォルダ可、中断・再開可）")
+    pr.add_argument("paths", nargs="+", help="PDF またはフォルダ")
+    pr.add_argument("--library", default=None, help="結果の保存先（既定: プロジェクトの library/、環境変数 PLO_LIBRARY）")
+    pr.add_argument("--no-recursive", action="store_true")
+    pr.add_argument("--max-pages", type=int, default=None, help="1つの PDF で処理する最大ページ数")
+    pr.add_argument("--time-limit", type=float, default=None, help="全体の上限（秒）。超えたら区切りのよいところで止める")
+    pr.set_defaults(func=cmd_prepare)
+
+    lb = sub.add_parser("library", help="事前処理した PDF の一覧")
+    lb.add_argument("--library", default=None)
+    lb.set_defaults(func=cmd_library)
+
     dt = sub.add_parser("detect", help="全ページの数式を自動検出する（MFD）")
     dt.add_argument("input")
     dt.add_argument("--out", required=True)

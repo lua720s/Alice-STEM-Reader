@@ -49,6 +49,7 @@ class ViewerSession:
         self.backend_name = backend
         self._backend = backend_obj
         self.auto: dict = {"state": "idle"}
+        self._disk_mtime = 0.0
         self.version = 0  # 式の集合が変わるたびに増やす（画面の再読み込み判定）
         if self.formulas_path.exists():
             self.fs = FormulaSet.load(self.formulas_path)
@@ -58,8 +59,11 @@ class ViewerSession:
             self.fs = FormulaSet()
         if self.fs.input_sha256 and self.fs.input_sha256 != self.input_sha:
             raise SessionError("式 JSON の input_sha256 が入力PDFと一致しない", 409)
-        self.fs.input_sha256 = self.input_sha
-        self._save()
+        if self.formulas_path.exists() and self.fs.input_sha256 == self.input_sha:
+            self._disk_mtime = self.formulas_path.stat().st_mtime  # 既存の結果はそのまま使う（書き直さない）
+        else:
+            self.fs.input_sha256 = self.input_sha
+            self._save()
 
     # ---- 内部 ----
     @property
@@ -70,6 +74,7 @@ class ViewerSession:
 
     def _save(self):
         self.fs.save(self.formulas_path)
+        self._disk_mtime = self.formulas_path.stat().st_mtime
 
     def _log(self, action: str, **kw):
         rec = {"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "action": action, **kw}
@@ -127,6 +132,7 @@ class ViewerSession:
             return {"input_sha256": self.input_sha, "formulas": [self._view(f) for f in self.fs.formulas]}
 
     def create(self, page: int, view_rect, latex: str | None = None, recognize: bool = False) -> dict:
+        self._check_writable()
         with self.lock:
             rect = self._to_stored(page, view_rect)
             n = 1
@@ -152,6 +158,7 @@ class ViewerSession:
         return self._view(f)
 
     def update(self, fid: str, latex=None, status=None, view_rect=None, reason=None) -> dict:
+        self._check_writable()
         with self.lock:
             f = self._get(fid)
             before = f.to_dict()
@@ -173,6 +180,7 @@ class ViewerSession:
             return self._view(f)
 
     def delete(self, fid: str) -> dict:
+        self._check_writable()
         with self.lock:
             f = self._get(fid)
             self.fs.formulas.remove(f)
@@ -187,6 +195,7 @@ class ViewerSession:
             return crop_png(self._page(f.page), f.rect, dpi=dpi)
 
     def recognize(self, fid: str) -> dict:
+        self._check_writable()
         with self.lock:  # 文書への描画だけを排他し、認識中も画面の操作を止めない
             f = self._get(fid)
             png = crop_png(self._page(f.page), f.rect, dpi=200)
@@ -217,10 +226,18 @@ class ViewerSession:
 
     # ---- 自動認識（開いた時点で全ページを検出・認識する） ----
     def auto_status(self) -> dict:
+        pid = self.preparing()
+        if pid or self.auto.get("state") != "running":
+            self.refresh_from_disk()
         with self.lock:
-            return dict(self.auto, version=self.version)
+            st = dict(self.auto, version=self.version)
+        if pid:
+            st.update(state="preparing", phase="prepare", pid=pid)
+        return st
 
     def start_auto(self, detector=None) -> dict:
+        if self.preparing():
+            return self.auto_status()  # 事前処理が進めているので、ビューアでは処理しない
         with self.lock:
             if self.auto.get("state") == "running":
                 return dict(self.auto)
@@ -233,74 +250,55 @@ class ViewerSession:
         return dict(self.auto)
 
     def _auto_run(self, detector):
-        from ..detect.mfd import MFDDetector, detect_page
+        from ..detect.mfd import MFDDetector
+        from ..prepare import process_document
 
         own = detector is None
         det = detector or MFDDetector()
-        doc = pymupdf.open(self.input)  # このスレッド専用（PyMuPDF の文書はスレッド間で共有しない）
+
+        def save():
+            self._save()
+            self.version += 1
+
+        def progress(**k):
+            self.auto.update({kk: v for kk, v in k.items() if kk != "pages"})
+
         try:
-            done_pages = set(self.fs.meta.get("auto_pages", []))
-            new_ids: list[str] = []
-            for pno in range(doc.page_count):
-                with self.lock:
-                    self.auto.update(phase="detect", page=pno + 1)
-                if pno in done_pages:
-                    continue
-                found = detect_page(det, doc[pno])
-                with self.lock:
-                    n = 0
-                    for d in found:
-                        # 既にある枠（手で描いた枠を含む）と重なるものは追加しない
-                        if any(g.page == pno and (iou(g.rect, d["rect"]) > 0.5 or _contained(d["rect"], g.rect) > 0.8)
-                               for g in self.fs.formulas):
-                            continue
-                        n += 1
-                        fid = f"auto_p{pno}_{n}"
-                        while any(g.id == fid for g in self.fs.formulas):
-                            n += 1
-                            fid = f"auto_p{pno}_{n}"
-                        self.fs.formulas.append(Formula(id=fid, page=pno, rect=tuple(d["rect"]), source="mfd",
-                                                        kind=d["kind"], confidence=d["conf"], status="pending"))
-                        new_ids.append(fid)
-                    self.fs.meta.setdefault("auto_pages", []).append(pno)
-                    self.fs.meta["detector"] = {"name": "PDF-Extract-Kit MFD yolo_v8_ft", **det.info.get("versions", {})}
-                    self.auto["found"] += n
-                    self._log("detect", page=pno, added=n)
-                    self._save()
-                    self.version += 1
-            if own:
-                det.close()
-            # 未認識の枠を認識する（自動で見つけた枠を上から順に）
+            r = process_document(self.input, self.fs, detector=det, backend=self.backend, lock=self.lock,
+                                 save=save, progress=progress, log=self._log)
             with self.lock:
-                todo = [f.id for f in self.fs.formulas if f.latex is None and f.status != "excluded"]
-                self.auto.update(phase="recognize", total=len(todo))
-            for fid in todo:
-                with self.lock:
-                    f = next((g for g in self.fs.formulas if g.id == fid), None)
-                    if f is None or f.latex is not None:
-                        continue
-                    png = crop_png(doc[f.page], f.rect, dpi=200)
-                    split = f.kind != "inline"
-                res = recognize_png(self.backend, png, dpi=200, split=split)
-                with self.lock:
-                    f = next((g for g in self.fs.formulas if g.id == fid), None)
-                    if f is not None and f.latex is None:
-                        if res.latex:
-                            f.ocr_latex = getattr(res, "raw", None) or res.latex
-                            f.latex = res.latex
-                            f.source = "mfd+" + getattr(self.backend, "name", "?")
-                        else:
-                            f.reason = f"recognition_failed: {res.error}"
-                        self._save()
-                        self.version += 1
-                    self.auto["recognized"] += 1
-            with self.lock:
-                self.auto.update(state="done", phase="done")
+                self.auto.update(state="done", phase="done", found=r["found"])
         except Exception as e:  # 失敗は画面に表示し、途中までの結果は残す
             with self.lock:
                 self.auto.update(state="error", error=f"{type(e).__name__}: {e}")
         finally:
-            doc.close()
+            if own:
+                det.close()
+
+    # ---- 事前処理（prepare）との排他 ----
+    def preparing(self) -> int | None:
+        from ..prepare import lock_holder
+
+        return lock_holder(self.workdir / ".prepare.lock")
+
+    def refresh_from_disk(self) -> bool:
+        """事前処理が書いた結果を読み直す（事前処理の実行中・直後）。"""
+        with self.lock:
+            try:
+                m = self.formulas_path.stat().st_mtime
+            except FileNotFoundError:
+                return False
+            if m <= self._disk_mtime:
+                return False
+            self.fs = FormulaSet.load(self.formulas_path)
+            self._disk_mtime = m
+            self.version += 1
+            return True
+
+    def _check_writable(self):
+        pid = self.preparing()
+        if pid:
+            raise SessionError(f"事前処理（pid {pid}）がこの PDF を処理中のため、終わるまで編集できない", 409)
 
     def export(self, mode: str = "invisible", only_confirmed: bool = False) -> dict:
         with self.lock:

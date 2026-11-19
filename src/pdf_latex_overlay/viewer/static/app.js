@@ -212,6 +212,8 @@ async function pollAuto() {
     if (a.state === "running") {
       el.textContent = a.phase === "detect" ? `数式を検出中… ${a.page}/${a.pages} ページ`
         : `認識中… ${a.recognized}/${a.total || 0}`;
+    } else if (a.state === "preparing") {
+      el.textContent = "事前処理中（終わるまで表示のみ。結果は順に反映）";
     } else if (a.state === "done") {
       el.textContent = "認識済み";
     } else if (a.state === "error") {
@@ -220,7 +222,7 @@ async function pollAuto() {
       el.textContent = "";
     }
     if (a.version !== lastVersion) { lastVersion = a.version; await refresh(); }
-    setTimeout(pollAuto, a.state === "running" ? 1500 : 5000);
+    setTimeout(pollAuto, (a.state === "running" || a.state === "preparing") ? 1500 : 5000);
   } catch (e) { setTimeout(pollAuto, 5000); }
 }
 
