@@ -77,7 +77,7 @@ def cmd_copycheck(a) -> int:
 def cmd_viewer(a) -> int:
     from .viewer.server import serve
 
-    return serve(a.input, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
+    return serve(a.paths, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
                  backend=a.backend, workdir=a.workdir, auto=not a.no_auto)
 
 
@@ -245,8 +245,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--no-pdfkit", action="store_true")
     c.set_defaults(func=cmd_copycheck)
 
-    v = sub.add_parser("viewer", help="ローカルビューアを起動する（127.0.0.1 のみ）")
-    v.add_argument("input")
+    v = sub.add_parser("viewer", help="ローカルビューアを起動する（127.0.0.1 のみ）。フォルダを渡すと左にコレクションが並ぶ")
+    v.add_argument("paths", nargs="+", help="PDF またはフォルダ（複数可）")
     v.add_argument("--formulas", default=None, help="式 JSON（なければ作業領域に新規作成）")
     v.add_argument("--workdir", default=None)
     v.add_argument("--port", type=int, default=0)

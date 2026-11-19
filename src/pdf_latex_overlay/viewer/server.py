@@ -18,13 +18,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .hub import Hub
 from .session import SessionError, ViewerSession, valid_id
 
 STATIC = Path(__file__).resolve().parent / "static"
-STATIC_FILES = {"index.html", "app.js", "style.css"}
+STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js"}
 
 
-def make_handler(session: ViewerSession, token: str, port_ref: dict):
+def make_handler(hub: Hub, token: str, port_ref: dict):
     class Handler(BaseHTTPRequestHandler):
         server_version = "pdf-latex-overlay-viewer"
 
@@ -92,8 +93,16 @@ def make_handler(session: ViewerSession, token: str, port_ref: dict):
                     return self._send(200, body, ctype, {"Content-Security-Policy": csp})
                 if not self._api_ok():
                     return self._json(401, {"error": "token required"})
+                # ---- コレクション（フォルダの階層）と、開く PDF の切り替え ----
+                if method == "GET" and path == "/api/tree":
+                    return self._json(200, hub.tree(refresh=q.get("refresh", ["0"])[0] == "1"))
+                if method == "POST" and path == "/api/open":
+                    b = self._body()
+                    hub.open(b.get("id"))
+                    return self._json(200, {"id": hub.current_id})
+                session = hub.require()  # 以降は、いま開いている PDF への操作
                 if method == "GET" and path == "/api/doc":
-                    return self._json(200, session.doc_info())
+                    return self._json(200, dict(session.doc_info(), id=hub.current_id))
                 if method == "GET" and path == "/api/formulas":
                     return self._json(200, session.list())
                 if method == "GET" and path == "/api/auto":
@@ -152,39 +161,45 @@ def default_workdir(input_path) -> Path:
     return entry_dir(input_path)[0]
 
 
-def make_server(session: ViewerSession, port: int = 0):
+from ..prepare import library_root  # noqa: E402
+
+
+def make_server(target, port: int = 0):
+    """target は Hub、または 1 つの ViewerSession（単体利用・試験用）。"""
+    hub = target if isinstance(target, Hub) else Hub.from_session(target)
     token = secrets.token_urlsafe(24)
     port_ref = {"port": port}
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(session, token, port_ref))
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(hub, token, port_ref))
     port_ref["port"] = httpd.server_address[1]
     return httpd, token
 
 
-def serve(input_path, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True) -> int:
-    from ..prepare import hold_lock, lock_holder, read_meta, write_meta
-
-    wd = Path(workdir) if workdir else default_workdir(input_path)
-    wd.mkdir(parents=True, exist_ok=True)
-    other = lock_holder(wd / ".viewer.lock")
-    if other:
-        print(f"この PDF は別のビューア（pid {other}）で開かれている: {wd}", file=sys.stderr)
+def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True) -> int:
+    """paths は PDF またはフォルダ（複数可）。フォルダなら左のコレクションに階層で並ぶ。"""
+    paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
+    try:
+        hub = Hub(paths, backend=backend, auto_on_open=False)
+    except SessionError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    single = len(hub.roots) == 1 and hub.roots[0].is_file()
+    if (formulas_path or workdir) and not single:
+        print("--formulas と --workdir は、PDF を1つだけ指定したときに使える", file=sys.stderr)
+        return 2
+    httpd, token = make_server(hub, port)
+    try:
+        if single:  # 1 つの PDF を指定したときは、そのまま開く（開いた時点で全ページを認識する）
+            hub.scan(force=True)
+            hub.open(hub.id_of(hub.roots[0]), formulas_path=formulas_path, workdir=workdir,
+                     auto=bool(auto and backend not in (None, "", "none")))
+    except SessionError as e:
+        print(str(e), file=sys.stderr)
+        httpd.server_close()
+        hub.close()
         return 3
-    with hold_lock(wd / ".viewer.lock"):
-        return _serve(input_path, wd, formulas_path, port, open_browser, backend, auto, read_meta, write_meta)
-
-
-def _serve(input_path, wd, formulas_path, port, open_browser, backend, auto, read_meta, write_meta) -> int:
-    session = ViewerSession(input_path, wd, formulas_path, backend=backend)
-    meta = read_meta(wd)  # ライブラリの一覧に出るよう、元の名前とパスを記録
-    meta.setdefault("state", "viewer")
-    meta.update(name=Path(input_path).name, input_sha256=session.input_sha, pages=session.doc.page_count,
-                source_paths=list(dict.fromkeys([*meta.get("source_paths", []), str(Path(input_path).resolve())])))
-    write_meta(wd, meta)
-    httpd, token = make_server(session, port)
-    if auto and backend not in (None, "", "none"):
-        session.start_auto()  # 開いた時点で全ページの数式を検出・認識する（裏で進め、画面は先に使える）
     url = f"http://127.0.0.1:{httpd.server_address[1]}/#token={token}"
-    print(f"ビューア: {url}\n作業領域: {session.workdir}\n終了は Ctrl+C", flush=True)
+    where = hub.session.workdir if hub.session else library_root()
+    print(f"ビューア: {url}\n作業領域: {where}\n終了は Ctrl+C", flush=True)
     if open_browser:
         webbrowser.open(url)
     try:
@@ -193,5 +208,5 @@ def _serve(input_path, wd, formulas_path, port, open_browser, backend, auto, rea
         pass
     finally:
         httpd.server_close()
-        session.close()
+        hub.close()
     return 0

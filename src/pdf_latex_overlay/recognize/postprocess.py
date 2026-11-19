@@ -284,6 +284,7 @@ def clean_latex(s: str | None) -> str | None:
         rows = [r for r in re.split(r"\\\\(?:\[[^\]]*\])?", m.group(3))]
         rows = [r.replace("&", "") for r in rows]
         return "\n".join(x for x in (clean_latex(r) for r in rows) if x)
+    t = re.sub(r"\\(mathrm|text|mbox)\{[~\s]*\}", " ", t)  # 空白だけの \mathrm{~} などの残りかす
     t = unwrap_braces(balance_braces(t))
     t = tidy_latex(t)
     t = tidy_latex(re.sub(r"(?<!\\)[_^]\{\}", " ", t))  # 空の上付き・下付き

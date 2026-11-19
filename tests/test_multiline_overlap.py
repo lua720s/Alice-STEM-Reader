@@ -37,6 +37,7 @@ def test_clean_user_example_structure():
     (r"\left\{ x \right\}", r"\left\{x\right\}"),
     (r"\sum_{k\mathop{=}1}^{n}", r"\sum_{k\mathop{=}1}^{n}"),
     (r"x}}+y", r"x+y"),
+    (r"\mathrm{~}", ""),
 ])
 def test_clean_latex_cases(raw, want):
     assert clean_latex(raw) == want
@@ -180,3 +181,9 @@ def test_saving_unchanged_multiline_is_not_edited(tmp_path, fx):
     assert not g["edited"], g
     assert s.update(f["id"], latex=f["latex"] + "+1")["edited"]
     s.close()
+
+
+def test_junk_line_from_recognizer_is_dropped():
+    """空白だけの行（`\\mathrm{~}`）は、複数行の結果から落とす（実教材で発生）。"""
+    from pdf_latex_overlay.recognize.postprocess import clean_lines
+    assert clean_lines("=\\frac{1}{4}(e^{2}-1)\n\\mathrm{~}") == "=\\frac{1}{4}(e^{2}-1)"

@@ -35,7 +35,7 @@ class SessionError(Exception):
 
 
 class ViewerSession:
-    def __init__(self, input_path, workdir, formulas_path=None, backend="none", backend_obj=None):
+    def __init__(self, input_path, workdir, formulas_path=None, backend="none", backend_obj=None, detector_obj=None):
         self.input = Path(input_path).resolve()
         if not self.input.is_file():
             raise SessionError(f"入力PDFがない: {self.input}", 404)
@@ -48,6 +48,9 @@ class ViewerSession:
         self.doc = pymupdf.open(self.input)  # 読み取りのみ
         self.backend_name = backend
         self._backend = backend_obj
+        self._detector = detector_obj  # Hub が持つ検出器を使い回す（PDF を切り替えても読み込み直さない）
+        self._stop = threading.Event()
+        self._auto_thread: threading.Thread | None = None
         self.auto: dict = {"state": "idle"}
         self._disk_mtime = 0.0
         self.version = 0  # 式の集合が変わるたびに増やす（画面の再読み込み判定）
@@ -246,6 +249,7 @@ class ViewerSession:
             self.auto = {"state": "running", "phase": "detect", "page": 0, "pages": self.doc.page_count,
                          "found": 0, "recognized": 0, "error": None}
         t = threading.Thread(target=self._auto_run, args=(detector,), daemon=True)
+        self._auto_thread = t
         t.start()
         return dict(self.auto)
 
@@ -253,8 +257,10 @@ class ViewerSession:
         from ..detect.mfd import MFDDetector
         from ..prepare import process_document
 
-        own = detector is None
-        det = detector or MFDDetector()
+        det = detector or self._detector
+        own = det is None
+        if own:
+            det = MFDDetector()
 
         def save():
             self._save()
@@ -265,15 +271,32 @@ class ViewerSession:
 
         try:
             r = process_document(self.input, self.fs, detector=det, backend=self.backend, lock=self.lock,
-                                 save=save, progress=progress, log=self._log)
+                                 save=save, progress=progress, log=self._log, should_stop=self._stop.is_set)
             with self.lock:
-                self.auto.update(state="done", phase="done", found=r["found"])
+                self.auto.update(state="done" if r["state"] == "done" else "idle", phase="done", found=r["found"])
+            self._update_meta("done" if r["state"] == "done" else "partial")
         except Exception as e:  # 失敗は画面に表示し、途中までの結果は残す
             with self.lock:
                 self.auto.update(state="error", error=f"{type(e).__name__}: {e}")
         finally:
             if own:
                 det.close()
+
+    def _update_meta(self, state: str):
+        """ライブラリの一覧（コレクションの状態表示）に出る状態と件数を更新する。"""
+        from ..prepare import read_meta, write_meta
+
+        try:
+            with self.lock:
+                counts = {"formulas": len(self.fs.formulas), "with_latex": sum(1 for f in self.fs.formulas if f.latex),
+                          "failed": sum(1 for f in self.fs.formulas if f.latex is None and f.status != "excluded")}
+            m = read_meta(self.workdir)
+            if m.get("state") == "running":  # 事前処理が進めている間は、その状態を壊さない
+                return
+            m.update(state=state, counts=counts, pages=self.doc.page_count)
+            write_meta(self.workdir, m)
+        except (OSError, ValueError):
+            pass
 
     # ---- 事前処理（prepare）との排他 ----
     def preparing(self) -> int | None:
@@ -322,6 +345,10 @@ class ViewerSession:
         }
 
     def close(self):
+        self._stop.set()  # 裏の自動認識を、区切りのよいところで止める
+        t = self._auto_thread
+        if t is not None and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=20)
         self.doc.close()
 
 
