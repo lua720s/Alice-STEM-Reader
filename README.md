@@ -72,7 +72,7 @@ cd このフォルダ && .venv/bin/python -m pdf_latex_overlay viewer 教材フ�
 - **UniMERNet base**（手元で動く・既定）: 実教材の33式で24式が正しく、最もよかった。tinyの約3倍遅い（先にOCRしておけば気にならない）。
 - **UniMERNet tiny**（手元で動く・軽い）: 速くメモリも少ないが、33式で17式。`--backend unimernet_tiny`、または画面の「エンジン」で選ぶ。
 - **PP-FormulaNet**（手元で動く）: 公開の評価では高いが、実教材の続きの行（`=` から始まる式）で劣った。`.venv-pp` の導入が要る（MODELS.md）。
-- **Mathpix**（**式の画像を外部に送る**）: 送る前に確認する（画面は確認ダイアログ、コマンドは `--allow-external`）。`mpx configure` で認証情報を設定しておく。認証情報はこのプログラムでは扱わない。
+- **Mathpix**（**従量課金制のAPI**。**式の画像を外部に送る**）: 送る前に確認する（画面は確認ダイアログ、コマンドは `--allow-external`）。`mpx configure` で認証情報を設定しておく。認証情報はこのプログラムでは扱わない。
 
 ```
 
