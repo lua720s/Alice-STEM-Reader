@@ -69,7 +69,31 @@ def group_rows(items: list[dict]) -> list[list[dict]]:
     return [sorted(r["items"], key=lambda i: i["view"][0]) for r in rows]
 
 
+def _merge_labels(row: list[dict]) -> list[dict]:
+    """ばらばらの「(」「1」「)」を、1つの「(1)」にまとめる（空白が入らないように）。"""
+    out: list[dict] = []
+    i = 0
+    while i < len(row):
+        for n in (4, 3, 2):
+            seg = row[i:i + n]
+            t = "".join(x["text"] for x in seg)
+            if len(seg) == n and all(x["kind"] == "text" for x in seg) and re.fullmatch(r"[（(]\d{1,3}[)）]", t):
+                out.append({"kind": "text", "text": t, "view": (seg[0]["view"][0], min(x["view"][1] for x in seg),
+                                                                seg[-1]["view"][2], max(x["view"][3] for x in seg))})
+                i += n
+                break
+        else:
+            out.append(row[i])
+            i += 1
+    return out
+
+
 def join_row(row: list[dict]) -> str:
+    row = _merge_labels(row)
+    # 日本語の文のなかの英字1文字（「x についての」）は、変数なので数式にする
+    if any(_CJK_RE.search(x["text"]) for x in row if x["kind"] == "text"):
+        row = [{**x, "kind": "formula", "text": f"\\({x['text']}\\)"} if x["kind"] == "text" and re.fullmatch(r"[A-Za-z]", x["text"]) else x
+               for x in row]
     out = ""
     prev = None
     for it in row:
@@ -87,6 +111,16 @@ def join_row(row: list[dict]) -> str:
     return out.strip()
 
 
+def _rows(items: list[dict]) -> list[list[dict]]:
+    """行ごとにまとめる。要素に "row"（画像の行の番号）があればそれで、なければ縦の重なりで。"""
+    if items and all(it.get("row") is not None for it in items):
+        by: dict[int, list[dict]] = {}
+        for it in items:
+            by.setdefault(it["row"], []).append(it)
+        return [sorted(by[k], key=lambda i: i["view"][0]) for k in sorted(by)]
+    return group_rows(items)
+
+
 def split_label(words: list[dict]) -> tuple[list[dict], list[dict]]:
     """左から並べた単語の先頭にある番号「(1)」「(2)」「①」と、残り。番号がなければ ([], words)。"""
     ws = sorted(words, key=lambda w: w["view"][0])
@@ -102,18 +136,18 @@ def math_runs(words: list[dict]) -> tuple[list[list[dict]], list[dict]]:
     """日本語の文字を含まない単語の連なりのうち、数式らしいもの（と、残りの単語）に分ける。"""
     runs: list[list[dict]] = []
     loose: list[dict] = []
-    for row in group_rows([{"kind": "text", "text": w["text"], "view": w["view"], "w": w} for w in words]):
+    items = [{"kind": "text", "text": w["text"], "view": w["view"], "w": w, "row": w.get("row")} for w in words]
+    for row in _rows(items):
         cur: list[dict] = []
 
         def flush():
             nonlocal cur
-            # 行頭の番号「(1)」「(2)」は、数式に含めず文章として残す
-            for n_ in range(1, min(len(cur), 4)):
-                if _LABEL_RE.match("".join(w["text"] for w in cur[:n_])) and "".join(w["text"] for w in cur[:n_]).count(")") + "".join(
-                        w["text"] for w in cur[:n_]).count("）") >= 1 and len(cur) > n_:
-                    loose.extend(cur[:n_])
-                    cur = cur[n_:]
-                    break
+            # 行頭の番号「(1)」「(2)」は、数式に含めず文章として残す（単語の途中でも切る）
+            if cur:
+                lab, rest = split_label_tokens(cur)
+                if lab and rest:
+                    loose.extend(lab)
+                    cur = rest
             if cur:
                 s = "".join(w["text"] for w in cur)
                 label = bool(_LABEL_RE.match(s))
@@ -141,11 +175,82 @@ def math_runs(words: list[dict]) -> tuple[list[list[dict]], list[dict]]:
     return runs, loose
 
 
+_LABEL_PREFIX_RE = re.compile(r"^(?:[（(]\d{1,3}[)）]|[①-⑳])")
+COLUMN_GAP = 2.5  # 単語のあいだが、文字の高さのこの倍率より広く空いていれば、別の段（「(1) …」「(2) …」の横並び）
+
+
+def split_label_tokens(ws: list[dict]) -> tuple[list[dict], list[dict]]:
+    """単語の並び（左から）の先頭にある番号「(1)」「①」を切り出す。OCR が番号の「)」と次の「(」を1つの単語「)(」に
+    してしまうことがあるので、単語の途中でも切る（位置は、文字数に比例して割る）。番号がなければ ([], ws)。"""
+    ws = sorted(ws, key=lambda w: w["view"][0])
+    s = "".join(w["text"].replace(" ", "") for w in ws)
+    m = _LABEL_PREFIX_RE.match(s)
+    if not m:
+        return [], ws
+    cut = m.end()
+    label: list[dict] = []
+    rest: list[dict] = []
+    seen = 0
+    for w in ws:
+        t = w["text"].replace(" ", "")
+        n = len(t)
+        if seen + n <= cut:
+            label.append(w)
+        elif seen >= cut:
+            rest.append(w)
+        else:  # 番号の途中で単語が切れる
+            a = cut - seen
+            x0, x1 = w["view"][0], w["view"][2]
+            xm = x0 + (x1 - x0) * a / n
+            label.append({**w, "text": t[:a], "view": (x0, w["view"][1], xm, w["view"][3])})
+            rest.append({**w, "text": t[a:], "view": (xm, w["view"][1], x1, w["view"][3])})
+        seen += n
+    return label, rest
+
+
+def column_split(ws: list[dict]) -> list[list[dict]]:
+    """1つの数式の枠の中の単語を、大きく空いた所で段に分ける（「(1) …   (2) …」の横並び）。"""
+    ws = sorted(ws, key=lambda w: w["view"][0])
+    if len(ws) < 2:
+        return [ws] if ws else []
+    h = max(max(w["view"][3] - w["view"][1] for w in ws), 1.0)
+    segs = [[ws[0]]]
+    for a, b in zip(ws, ws[1:]):
+        if b["view"][0] - a["view"][2] > COLUMN_GAP * h:
+            segs.append([])
+        segs[-1].append(b)
+    return segs
+
+
+def _bands(png: bytes, dpi: int, clip) -> list[tuple[float, float]]:
+    """領域の画像の行（インクのある横帯）の上下位置（見た目の座標 pt）。行がなければ空。"""
+    from .postprocess import line_segments
+
+    try:
+        _, segs = line_segments(png, dpi, min_gap_pt=1.5, min_line_pt=4.0)
+    except Exception:
+        return []
+    k = dpi / 72.0
+    return [(clip.y0 + a / k, clip.y0 + b / k) for a, b in segs]
+
+
+def _row_of(view, bands) -> int | None:
+    """要素の縦の中心が入る行の番号（どの行にも入らなければ、いちばん近い行）。"""
+    if not bands:
+        return None
+    cy = (view[1] + view[3]) / 2
+    for i, (a, b) in enumerate(bands):
+        if a - 0.5 <= cy <= b + 0.5:
+            return i
+    return min(range(len(bands)), key=lambda i: min(abs(cy - bands[i][0]), abs(cy - bands[i][1])))
+
+
 def recognize_mixed(page: pymupdf.Page, view_rect, page_boxes: list[dict], backend, text_backend, dpi: int = 200,
                     verifier=None) -> MixedResult | None:
-    """view_rect（見た目の座標 pt）の領域を、文章 + 数式として読む。数式だけの領域なら None。
+    """view_rect（見た目の座標 pt）の領域を、文章 + 数式として読む。文章がない領域（数式だけ）は None。
 
     page_boxes: そのページの数式検出の結果（detect_page の戻り値）。
+    行の区切りは、領域の画像の横帯（インクのない隙間）から決める。文章の単語・数式の枠は、縦の中心が入る行に入れる。
     """
     reg = tuple(pymupdf.Rect(view_rect) & page.rect)
     if _area(reg) <= 0:
@@ -161,9 +266,11 @@ def recognize_mixed(page: pymupdf.Page, view_rect, page_boxes: list[dict], backe
                 boxes.append({**b, "view": tuple(v)})
     clip = pymupdf.Rect(reg)
     pix = page.get_pixmap(dpi=dpi, clip=clip, alpha=False)
+    png = pix.tobytes("png")
     k = dpi / 72.0
+    bands = _bands(png, dpi, clip)
     words = []
-    for ln in text_backend.read(pix.tobytes("png"), words=True):
+    for ln in text_backend.read(png, words=True):
         if float(ln.get("score", 0)) < MIN_WORD_SCORE:
             continue
         for w in ln.get("words") or [{"text": ln["text"], "box": ln["box"]}]:
@@ -171,8 +278,8 @@ def recognize_mixed(page: pymupdf.Page, view_rect, page_boxes: list[dict], backe
             if not t:
                 continue
             b = w["box"]
-            words.append({"text": t, "score": ln["score"],
-                          "view": (clip.x0 + b[0] / k, clip.y0 + b[1] / k, clip.x0 + b[2] / k, clip.y0 + b[3] / k)})
+            v = (clip.x0 + b[0] / k, clip.y0 + b[1] / k, clip.x0 + b[2] / k, clip.y0 + b[3] / k)
+            words.append({"text": t, "score": ln["score"], "view": v, "row": _row_of(v, bands)})
     # 日本語の文字が中にある数式の枠は、文章の誤検出として捨てる
     keep, dropped = [], 0
     for b in boxes:
@@ -182,47 +289,98 @@ def recognize_mixed(page: pymupdf.Page, view_rect, page_boxes: list[dict], backe
             dropped += 1
         else:
             keep.append(b)
-    for i, b in enumerate(keep):  # 数式の枠の左端にある番号「(1)」は、枠から外して文章にする
+    # 数式の枠を、段（横並び）ごとに分け、左端の番号「(1)」を枠から外して文章にする
+    refined = []
+    touched: set[int] = set()  # 分けた枠の中にあった元の単語
+    added: list[dict] = []  # 切り出した番号と、分けた単語
+    for b in keep:
         inner = [w for w in words if _inside(_center(w["view"]), b["view"])]
-        lab, rest = split_label(inner)
-        if lab and rest:
-            x0 = max(w["view"][2] for w in lab) + 1
-            keep[i] = {**b, "view": (x0, b["view"][1], b["view"][2], b["view"][3])}
+        if b["kind"] == "display" and bands and inner:
+            # 表示数式の枠は、数式検出が段の一部しか囲まないことがある（「(1) …   (2) …」の横並び）。同じ行の単語を段に分け、
+            # 枠に触れる段を、枠の外の単語も含めて、1つの数式として扱う。日本語の文字が入る段は、文章のまま残す
+            row = _row_of(b["view"], bands)
+            row_ws = [w for w in words if w.get("row") == row]
+            segs = [c for c in column_split(row_ws) if any(_inside(_center(w["view"]), b["view"]) for w in c)
+                    and sum(len(_CJK_RE.findall(w["text"])) for w in c) < 2] or [inner]
+        else:
+            segs = column_split(inner) or [[]]
+        for seg in segs:
+            lab, rest = split_label_tokens(seg) if seg else ([], seg)
+            if rest and (lab or len(segs) > 1):
+                v = b["view"]
+                refined.append({**b, "kind": "inline",
+                                "view": (min(w["view"][0] for w in rest) - 1.0, v[1], max(w["view"][2] for w in rest) + 1.0, v[3])})
+                touched |= {id(w) for w in seg}
+                added += lab + rest
+            else:
+                refined.append(b)
+    keep = refined
+    words = [w for w in words if id(w) not in touched] + added
+    # 枠は、中心がある行の上下に収める（隣の行を含めない）
+    clamped = []
+    for b in keep:
+        i = _row_of(b["view"], bands)
+        if i is not None:
+            a, c = bands[i]
+            v = b["view"]
+            b = {**b, "view": (v[0], max(v[1], a - 1.0), v[2], min(v[3], c + 1.0))}
+        clamped.append(b)
+    keep = clamped
+    # 複数の行にまたがる枠は、行ごとの枠に分ける（行をまたいで1つの数式として読むと、隣の行が混ざる）
+    pieces = []
+    for b in keep:
+        v = b["view"]
+        rows_hit = [i for i, (a, c) in enumerate(bands) if min(v[3], c) - max(v[1], a) > 0.4 * (c - a)]
+        if len(rows_hit) <= 1:
+            pieces.append(b)
+            continue
+        for i in rows_hit:
+            a, c = bands[i]
+            pieces.append({**b, "view": (v[0], max(v[1], a - 1.0), v[2], min(v[3], c + 1.0)), "kind": "inline"})
+    keep = pieces
     text_words = [w for w in words if not any(_inside(_center(w["view"]), b["view"]) for b in keep)
                   and re.search(r"[\w" + _CJK + re.escape(_PUNCT) + "]", w["text"])]
     if not any(looks_like_text(w["text"]) for w in text_words):
         return None  # 文章がない（数式だけ）
     # 数式検出が見落とした数式（文章の文字を含まない、数式らしい連なり）は、その範囲を数式として読み直す
     runs, loose = math_runs(text_words)
-    items = [{"kind": "text", "text": w["text"], "view": w["view"]} for w in loose]
+    items = [{"kind": "text", "text": w["text"], "view": w["view"], "row": w.get("row")} for w in loose]
+
+    def read_formula(r, kind):
+        """切り抜きを数式として読む。行の上下に収める（隣の行を含めない）。"""
+        try:
+            res = recognize_png(backend, crop_png(page, r, dpi=dpi), dpi=dpi, split=(kind != "inline"), verifier=verifier)
+        except ValueError:
+            return None
+        return res.latex.strip() if res is not None and res.latex else None
+
     for run in runs:
         r = pymupdf.Rect(min(w["view"][0] for w in run) - 1, min(w["view"][1] for w in run) - 1,
                          max(w["view"][2] for w in run) + 1, max(w["view"][3] for w in run) + 1) & page.rect
-        try:
-            res = recognize_png(backend, crop_png(page, r, dpi=dpi), dpi=dpi, split=False, verifier=verifier)
-        except ValueError:
-            res = None
-        if res is not None and res.latex and len(res.latex.strip()) >= 2:
-            items.append({"kind": "formula", "text": f"\\({res.latex.strip()}\\)", "view": tuple(r)})
+        latex = read_formula(r, "inline")
+        if latex and len(latex) >= 2:
+            items.append({"kind": "formula", "text": f"\\({latex}\\)", "view": tuple(r), "row": _row_of(tuple(r), bands)})
         else:
-            items += [{"kind": "text", "text": w["text"], "view": w["view"]} for w in run]
+            items += [{"kind": "text", "text": w["text"], "view": w["view"], "row": w.get("row")} for w in run]
     for b in keep:
         r = pymupdf.Rect(b["view"]) & page.rect
-        try:
-            png = crop_png(page, r, dpi=dpi)
-        except ValueError:
+        inner = sorted([w for w in words if _inside(_center(w["view"]), b["view"])], key=lambda w: w["view"][0])
+        short = "".join(w["text"] for w in inner)
+        if b["kind"] == "inline" and inner and len(short) <= 3 and re.fullmatch(r"[A-Za-z0-9]+", short) and all(
+                w["score"] >= 0.8 for w in inner):
+            # 「x」「y」などの1〜3字は、短くて UniMERNet が隣の文字を拾いやすいので、OCR の文字をそのまま数式にする
+            items.append({"kind": "formula", "text": f"\\({short}\\)", "view": tuple(r), "row": _row_of(tuple(r), bands)})
             continue
-        res = recognize_png(backend, png, dpi=dpi, split=(b["kind"] != "inline"), verifier=verifier)
-        if res.latex:
-            latex = res.latex.strip()
+        latex = read_formula(r, b["kind"])
+        if latex:
             wrap = ("\\(", "\\)") if b["kind"] == "inline" else ("\\[", "\\]")
             if "\n" in latex:
                 wrap = ("\\[", "\\]")
-            items.append({"kind": "formula", "text": f"{wrap[0]}{latex}{wrap[1]}", "view": tuple(r), "display": wrap[0] == "\\["})
+            items.append({"kind": "formula", "text": f"{wrap[0]}{latex}{wrap[1]}", "view": tuple(r),
+                          "display": wrap[0] == "\\[", "row": _row_of(tuple(r), bands)})
         else:  # 読めなかった枠は、中の文字（数字・記号）を文章として残す
-            items += [{"kind": "text", "text": w["text"], "view": w["view"]}
-                      for w in words if _inside(_center(w["view"]), b["view"])]
-    rows = group_rows(items)
+            items += [{"kind": "text", "text": w["text"], "view": w["view"], "row": w.get("row")} for w in inner]
+    rows = _rows(items)
     for r in rows:  # 同じ行に文章もあるなら、表示数式ではなく行内数式にする（「(1) \\(…\\) として」）
         if len(r) > 1:
             for it in r:

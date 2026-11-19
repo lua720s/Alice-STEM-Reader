@@ -201,3 +201,17 @@ def test_middle_dot_and_dash_are_not_japanese_text(fx, tmp_path):
         {"text": "nCn", "box": px(210, 100, 290, 120)}]}])
     assert recognize_mixed(doc[0], REGION, boxes, FixedBackend(["a"]), ocr) is None  # 文章がない: 数式として読む
     doc.close()
+
+
+def test_two_columns_labels_and_variables_in_text():
+    def t(s, x0, x1, kind="text"):
+        return {"kind": kind, "text": s, "view": (x0, 0, x1, 12)}
+
+    row = [t("(", 0, 3), t("1", 3, 8), t(")", 8, 11), t(r"\(a\)", 20, 60, "formula"), t("(", 120, 123), t("2", 123, 128), t(")", 128, 131),
+           t(r"\(b\)", 140, 180, "formula")]
+    assert join_row(row) == r"(1) \(a\) (2) \(b\)"  # 番号は詰め、段のあいだは空白
+    # 日本語の文のなかの英字1文字は、変数（数式）にする
+    sent = [t("式を", 0, 20), t("x", 24, 30), t("について", 34, 70)]
+    assert join_row(sent) == r"式を \(x\) について"
+    # 英文の行は、そのまま
+    assert join_row([t("a", 0, 6), t("cat", 10, 30)]) == "a cat"
