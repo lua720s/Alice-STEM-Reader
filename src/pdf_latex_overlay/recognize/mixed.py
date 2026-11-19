@@ -6,7 +6,7 @@
 3. 残った数式の枠は UniMERNet などで LaTeX にする。文章は、数式の枠の外の文字だけを使う。
 4. 文章と数式を、上から下・左から右の行にまとめる。
 
-数式だけの領域（枠がほぼ領域全体を占める、または文章がない）は、None を返す（呼び出し側が従来どおり数式として読む）。
+文章がない領域（数式だけ）は、None を返す（呼び出し側が従来どおり数式として読む）。
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ _PUNCT = "()（）[]［］「」『』【】〈〉《》，、。．.,;:；：�
 _LABEL_RE = re.compile(r"^[（(]?\d{1,3}[)）]?$|^[①-⑳]$")  # 「(1)」「②」などの番号
 _MATHY_OP_RE = re.compile(r"[=+\-−×÷^²³√∫∑∏πθ<>≤≥/]")
 _MATHY_ONLY_RE = re.compile(r"[A-Za-z0-9\s().,^'′]+")
-PURE_FORMULA_COVER = 0.6  # 数式の枠が領域のこの割合以上を占めるなら、数式だけの領域とみなす（OCR は行わない）
 
 
 @dataclass
@@ -88,6 +87,17 @@ def join_row(row: list[dict]) -> str:
     return out.strip()
 
 
+def split_label(words: list[dict]) -> tuple[list[dict], list[dict]]:
+    """左から並べた単語の先頭にある番号「(1)」「(2)」「①」と、残り。番号がなければ ([], words)。"""
+    ws = sorted(words, key=lambda w: w["view"][0])
+    for n in range(1, min(len(ws), 4) + 1):
+        s = "".join(w["text"] for w in ws[:n])
+        if _LABEL_RE.match(s) and (s[0] in "(（①②③④⑤⑥⑦⑧⑨⑩" or n == 1 and re.match(r"^[①-⑳]$", s)) and (
+                s[-1] in ")）" or re.match(r"^[①-⑳]$", s)):
+            return ws[:n], ws[n:]
+    return [], ws
+
+
 def math_runs(words: list[dict]) -> tuple[list[list[dict]], list[dict]]:
     """日本語の文字を含まない単語の連なりのうち、数式らしいもの（と、残りの単語）に分ける。"""
     runs: list[list[dict]] = []
@@ -97,6 +107,13 @@ def math_runs(words: list[dict]) -> tuple[list[list[dict]], list[dict]]:
 
         def flush():
             nonlocal cur
+            # 行頭の番号「(1)」「(2)」は、数式に含めず文章として残す
+            for n_ in range(1, min(len(cur), 4)):
+                if _LABEL_RE.match("".join(w["text"] for w in cur[:n_])) and "".join(w["text"] for w in cur[:n_]).count(")") + "".join(
+                        w["text"] for w in cur[:n_]).count("）") >= 1 and len(cur) > n_:
+                    loose.extend(cur[:n_])
+                    cur = cur[n_:]
+                    break
             if cur:
                 s = "".join(w["text"] for w in cur)
                 label = bool(_LABEL_RE.match(s))
@@ -117,7 +134,7 @@ def math_runs(words: list[dict]) -> tuple[list[list[dict]], list[dict]]:
                 continue
             if cur:
                 gap = w["view"][0] - cur[-1]["view"][2]
-                if gap > 1.2 * max(w["view"][3] - w["view"][1], 1.0):
+                if gap > 3.0 * max(w["view"][3] - w["view"][1], 1.0):  # 数式は、項のあいだが広く空くことがある
                     flush()
             cur.append(w)
         flush()
@@ -133,10 +150,15 @@ def recognize_mixed(page: pymupdf.Page, view_rect, page_boxes: list[dict], backe
     reg = tuple(pymupdf.Rect(view_rect) & page.rect)
     if _area(reg) <= 0:
         return None
-    boxes = [b for b in page_boxes if _inside(_center(b["view"]), reg)]
-    if any(_inter(b["view"], reg) / _area(reg) >= PURE_FORMULA_COVER for b in boxes) or (
-            sum(_inter(b["view"], reg) for b in boxes) / _area(reg) >= PURE_FORMULA_COVER):
-        return None  # 数式だけの領域
+    # 数式の枠が領域の大部分を占めていても、OCR は省かない（数式検出は、行の途中の「のとき」のような文章も、
+    # 行ごと数式の枠にしてしまう。2026-11-19 のユーザーの報告）
+    # 領域の外にはみ出した枠（行頭の番号「(1)」を含む枠など）は、領域の中だけに切り詰める
+    boxes = []
+    for b in page_boxes:
+        if _inside(_center(b["view"]), reg):
+            v = pymupdf.Rect(b["view"]) & pymupdf.Rect(reg)
+            if not v.is_empty:
+                boxes.append({**b, "view": tuple(v)})
     clip = pymupdf.Rect(reg)
     pix = page.get_pixmap(dpi=dpi, clip=clip, alpha=False)
     k = dpi / 72.0
@@ -155,10 +177,17 @@ def recognize_mixed(page: pymupdf.Page, view_rect, page_boxes: list[dict], backe
     keep, dropped = [], 0
     for b in boxes:
         inner = [w for w in words if _inside(_center(w["view"]), b["view"])]
-        if any(_CJK_RE.search(w["text"]) for w in inner):
+        # 日本語の文字が2字以上あるときだけ、文章とみなす（積分記号などを、仮名1字に読み違えた場合を除く）
+        if sum(len(_CJK_RE.findall(w["text"])) for w in inner if w["score"] >= 0.6) >= 2:
             dropped += 1
         else:
             keep.append(b)
+    for i, b in enumerate(keep):  # 数式の枠の左端にある番号「(1)」は、枠から外して文章にする
+        inner = [w for w in words if _inside(_center(w["view"]), b["view"])]
+        lab, rest = split_label(inner)
+        if lab and rest:
+            x0 = max(w["view"][2] for w in lab) + 1
+            keep[i] = {**b, "view": (x0, b["view"][1], b["view"][2], b["view"][3])}
     text_words = [w for w in words if not any(_inside(_center(w["view"]), b["view"]) for b in keep)
                   and re.search(r"[\w" + _CJK + re.escape(_PUNCT) + "]", w["text"])]
     if not any(looks_like_text(w["text"]) for w in text_words):

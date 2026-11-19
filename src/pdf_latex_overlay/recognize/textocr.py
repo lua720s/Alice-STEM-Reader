@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKER = Path(__file__).resolve().parent / "ppocr_worker.py"
 TEXT_DPI = 150
 MIN_SCORE = 0.5
-_CJK = r"\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f"
+# 「・」（U+30FB、数式の「……」を読み違えやすい）と「ー」（U+30FC、マイナス記号を読み違えやすい）は、日本語の文字に数えない
+_CJK = r"\u3040-\u30fa\u30fd-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f"
 
 
 def looks_like_text(s: str) -> bool:

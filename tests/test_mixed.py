@@ -86,13 +86,28 @@ def test_mixed_region_becomes_text_with_inline_math_and_drops_false_formula_boxe
 
 def test_formula_only_region_is_left_to_the_formula_path(fx, tmp_path):
     doc = pymupdf.open(_page(fx, tmp_path))
-    ocr = _two_row_ocr()
-    # 枠が領域のほとんどを占める: OCR もせずに None
-    boxes = detect_page(FakeDetector([(22, 62, 298, 138, 1)]), doc[0])
-    assert recognize_mixed(doc[0], REGION, boxes, FixedBackend(["x"]), ocr) is None and ocr.calls == 0
-    # 文章がない: None
+    # 文章がない（数式だけ）: OCR は行うが、None（従来どおり数式として読む）
     only_math = FakeOCR([{"text": "x2", "score": 0.9, "box": px(30, 62, 60, 78), "words": [{"text": "x2", "box": px(30, 62, 60, 78)}]}])
+    boxes = detect_page(FakeDetector([(22, 62, 298, 138, 1)]), doc[0])
+    assert recognize_mixed(doc[0], REGION, boxes, FixedBackend(["x"]), only_math) is None and only_math.calls == 1
     assert recognize_mixed(doc[0], REGION, [], FixedBackend(["x"]), only_math) is None
+    # 仮名1字を読み違えただけ（積分記号など）では、文章とみなさない
+    one_kana = FakeOCR([{"text": "ノ", "score": 0.9, "box": px(30, 62, 60, 78), "words": [{"text": "ノ", "box": px(30, 62, 60, 78)}]}])
+    assert recognize_mixed(doc[0], REGION, boxes, FixedBackend(["x"]), one_kana) is None
+    doc.close()
+
+
+def test_text_inside_a_whole_line_formula_box_is_separated(fx, tmp_path):
+    """行ごと数式の枠になっても、中の「のとき」は文章として分ける（ユーザーの報告: 文章とLaTeXの区別がついていない）。"""
+    doc = pymupdf.open(_page(fx, tmp_path))
+    boxes = detect_page(FakeDetector([(25, 90, 295, 130, 1)]), doc[0])  # 行全体（領域の大部分）が1つの数式の枠
+    ocr = FakeOCR([{"text": "2≤n, r=1 のとき nCr=1", "score": 0.95, "box": px(30, 100, 290, 120), "words": [
+        {"text": "2≤n,", "box": px(30, 100, 70, 120)}, {"text": "r=1", "box": px(80, 100, 110, 120)},
+        {"text": "のとき", "box": px(130, 100, 180, 120)}, {"text": "nCr=1", "box": px(200, 100, 290, 120)}]}])
+    r = recognize_mixed(doc[0], REGION, boxes, FixedBackend(["{}_{n}C_{r}"]), ocr)
+    assert r is not None and r.dropped_boxes == 1
+    assert "のとき" in r.latex and r.latex.count("\\(") == 2  # 前後の数式は、それぞれ \( … \)、「のとき」は文章
+    assert r.latex.index("のとき") > r.latex.index("\\(") and r.latex.rindex("\\(") > r.latex.index("のとき")
     doc.close()
 
 
@@ -117,7 +132,7 @@ def test_drawn_formula_box_keeps_the_old_formula_path(fx, tmp_path):
     ocr = FakeOCR([])
     s = _session(fx, tmp_path, [(22, 62, 298, 138, 1)], ocr, ["x^{2}"])
     f = s.create(0, REGION, recognize=True)
-    assert f["kind"] is None and f["latex"].startswith("x^{2}") and ocr.calls == 0  # 数式だけ: 従来どおり、OCRなし
+    assert f["kind"] is None and f["latex"].startswith("x^{2}") and ocr.calls == 1  # 数式だけ: 文章が見つからないので、従来どおり数式として読む
     s.close()
 
 
@@ -139,3 +154,50 @@ def test_join_spacing_and_display_becomes_inline_with_text():
 
     # 「(」「1」「)」は詰め、日本語どうしも詰める
     assert join_row([t("(", 0, 3), t("1", 3.5, 8), t(")", 8.5, 11), t("次", 11.5, 21), t("の", 21.5, 31)]) == "(1)次の"
+
+
+def test_leading_label_is_text_and_wide_gaps_stay_one_formula():
+    from pdf_latex_overlay.recognize.mixed import math_runs
+
+    def w(t, x0, x1):
+        return {"text": t, "view": (x0, 0, x1, 20), "score": 0.9}
+
+    words = [w("(", 0, 4), w("1", 4, 12), w(")", 12, 16), w("nC0", 40, 90), w("+", 130, 140), w("nC1", 180, 230)]
+    runs, loose = math_runs(words)
+    assert [[x["text"] for x in r] for r in runs] == [["nC0", "+", "nC1"]]  # 離れた項も、1つの数式
+    assert [x["text"] for x in loose] == ["(", "1", ")"]  # 番号は、数式に含めない
+
+
+def test_formula_box_sticking_out_of_the_region_is_clipped_to_it(fx, tmp_path):
+    """枠が領域の外（左の番号「(1)」）にはみ出していても、番号を数式に取り込まない。"""
+    doc = pymupdf.open(_page(fx, tmp_path))
+    boxes = detect_page(FakeDetector([(5, 90, 295, 130, 1)]), doc[0])  # 領域（x=20〜）より左に5ptはみ出す
+    seen = []
+
+    class Rec(FixedBackend):
+        def recognize(self, images_png):
+            seen.append(images_png[0])
+            return super().recognize(images_png)
+
+    ocr = FakeOCR([{"text": "のとき x", "score": 0.95, "box": px(30, 100, 290, 120), "words": [
+        {"text": "のとき", "box": px(130, 100, 180, 120)}, {"text": "x2", "box": px(200, 100, 290, 120)}]}])
+    r = recognize_mixed(doc[0], REGION, boxes, Rec(["x^{2}"]), ocr)
+    assert r is not None and "のとき" in r.latex
+    for png in seen:  # 数式として読んだ切り抜きは、領域の左端（x=20pt）より左を含まない
+        pix = pymupdf.Pixmap(png)
+        assert pix.width <= int((300 - 20) * K) + 4
+    doc.close()
+
+
+def test_middle_dot_and_dash_are_not_japanese_text(fx, tmp_path):
+    """数式の「……」を「・」と読み違えても、その数式の枠を文章として捨てない。"""
+    from pdf_latex_overlay.recognize.textocr import looks_like_text
+
+    assert not looks_like_text("・・・・・") and not looks_like_text("ー") and looks_like_text("のとき")
+    doc = pymupdf.open(_page(fx, tmp_path))
+    boxes = detect_page(FakeDetector([(25, 90, 295, 130, 1)]), doc[0])
+    ocr = FakeOCR([{"text": "nC0+・・・・・+nCn", "score": 0.95, "box": px(30, 100, 290, 120), "words": [
+        {"text": "nC0", "box": px(30, 100, 80, 120)}, {"text": "+・・・・・+", "box": px(90, 100, 200, 120)},
+        {"text": "nCn", "box": px(210, 100, 290, 120)}]}])
+    assert recognize_mixed(doc[0], REGION, boxes, FixedBackend(["a"]), ocr) is None  # 文章がない: 数式として読む
+    doc.close()
