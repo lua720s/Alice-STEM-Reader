@@ -547,9 +547,40 @@ async function loadTree(force = false) {
     if (state.doc) refresh();
   }
   tree.prevOcr = ocr ? ocr.state : null; tree.ocr = ocr; tree.ocrRunning = !!(ocr && ocr.state === "running");
+  syncEngine(t);
   renderOcrBar(ocr);
   return t;
 }
+
+// ---- 認識エンジン（PP-FormulaNet / UniMERNet / Mathpix）の選択
+function syncEngine(t) {
+  const sel = $("engine"); if (!sel || !t.engines) return;
+  const key = t.engines.map((e) => e.name).join(",");
+  if (sel.dataset.key !== key) {
+    sel.textContent = "";
+    const none = document.createElement("option"); none.value = "none"; none.textContent = "エンジン未選択"; sel.append(none);
+    for (const e of t.engines) { const o = document.createElement("option"); o.value = e.name; o.textContent = e.label; sel.append(o); }
+    sel.dataset.key = key;
+  }
+  sel.value = t.backend || "none";
+  sel.disabled = !!tree.ocrRunning || !!t.readonly;
+  if (state.doc) { state.doc.backend = t.backend; $("autorun").disabled = !t.backend || t.backend === "none"; }
+}
+$("engine").addEventListener("change", async (ev) => {
+  const sel = ev.target, name = sel.value, prev = tree.data ? tree.data.backend || "none" : "none";
+  if (name === "none") { sel.value = prev; return; }
+  const ext = (tree.data.engines.find((e) => e.name === name) || {}).external;
+  if (ext) {
+    const r = await ask({ title: "Mathpix に式の画像を送りますか？", ok: "送ることに同意して使う",
+      message: "認識する式の画像が、外部サービス（Mathpix）に送信されます。教材や資料が第三者に渡ってよい場合だけ同意してください。同意しない場合は、手元で動く PP-FormulaNet / UniMERNet を選べます。" });
+    if (!r) { sel.value = prev; return; }
+  }
+  try {
+    await api("POST", "/api/engine", { name, confirm_external: !!ext });
+    await loadTree(true);
+    toast(`認識エンジンを切り替えました`, 2000);
+  } catch (e) { sel.value = prev; toast(`切り替えられません: ${e.message}`, 5000); }
+});
 
 function revealCurrent() {
   const t = tree.data;
@@ -718,7 +749,7 @@ function menuItemsFor(key) {
   const ro = !!tree.data.readonly, noModel = noModels();
   const fsItem = (label, run, extra = {}) => ({ label, run, disabled: ro, title: ro ? "読み取り専用で起動しているため、ファイルは動かせません" : "", ...extra });
   const ocr = { label: n.type === "folder" ? "OCRを行う（フォルダ全体）" : "OCRを行う", run: () => actOcr([key]), disabled: noModel,
-    title: noModel ? "認識モデルがありません（--backend unimernet で起動）" : "" };
+    title: noModel ? "認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）" : "" };
   if (n.type === "file") {
     return [ocr, fsItem("名前を変更", () => actRename(key)), fsItem("別の場所へ移動", () => actMove([key])), "-",
       fsItem("ゴミ箱へ移動", () => actTrash([key]), { danger: true })];
@@ -788,7 +819,7 @@ async function actNewFolder(parentKey) {
   }
 }
 async function actOcr(keys) {
-  if (noModels()) { toast("認識モデルがありません（--backend unimernet で起動）", 4000); return; }
+  if (noModels()) { toast("認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）", 4000); return; }
   const n = countFiles(keys);
   if (!n) { toast("対象のPDFがありません"); return; }
   if (n > 1) {

@@ -215,3 +215,46 @@ tiny（主）とbase（検証用）で同じ枠を同じ手順で読み、**数�
 - 標本が小さく（正解つきは11式）、判定も私が行った。
 - 難しいページでは、印が多くなる（48個中30個）。印は「間違い」ではなく「確認が必要」の意味。「次の要確認」で順に確認できる。
 
+
+## PP-FormulaNet の検証と、認識エンジンの選択（2026-11-19）
+
+「PP-FormulaNetの方が精度がいい」という情報を、公開の評価と手元の実測で確かめた。
+
+**公開の評価（PaddleOCR 公式資料、PaddleX の内部評価セット。BLEU系の指標なので、LaTeXの書き方の違いに弱い）**: UniMERNet 85.91、PP-FormulaNet-S 87.00、-L 90.36、plus-S 88.71、plus-M 91.45、plus-L 92.22。公式の数字では、PP-FormulaNet のほうが高い。ただし、評価セットは Paddle 側のもので、日本語の教材ではない。
+
+**手元の実測（実教材の正解つき11式、同じ枠・同じ前処理、CPU）**
+
+| モデル | 200 dpi | 1式の時間 | メモリ | 大きさ |
+| --- | --- | --- | --- | --- |
+| UniMERNet tiny | 数学的に同じ 9/11（正確一致 6/11） | 0.83秒 | 約440MB | 約430MB |
+| UniMERNet base | 9/11（正確一致 7/11） | 1.93秒 | 約1250MB | 約1.3GB |
+| PP-FormulaNet plus-M | 3/11（正確一致 2/11） | 0.70秒 | 約1050MB | 約620MB |
+| PP-FormulaNet plus-S | 1/11（正確一致 1/11） | 0.27秒 | 約580MB | 約260MB |
+
+（「数学的に同じ」は、`recognize/verify.py` の判定。plus-L・-L は容量の都合で試していない。）
+
+**誤りの中身**: plus-M の食い違い8式のうち、**行頭の `=` を落とした**ものが5式（教材の式は `=` から始まる続きの行が多く、PP-FormulaNetは「式全体」を読む前提のようで、行頭の `=` を落とす）。**数字の読み間違い（`4`→`1`）が2式**、文末に `.` を足したものが1式。plus-S は、`\operatorname{l o g}`（空白入り）、`\limits`、`\boxed{}`、`\frac` の重複、添字の崩れなど、plus-M より誤りが多かった。
+
+**結論**
+- **この標本（11式、正解は私が作成）では、「PP-FormulaNetのほうが精度がいい」とは言えなかった。** 公開の数字とは逆で、教材の続きの行（`=` から始まる）で劣る。標本が小さいので、断定はしない。
+- したがって、**既定のエンジンはUniMERNet（tiny）のまま**にした。PP-FormulaNetは、画面とコマンドで選べる。
+- 実装: `recognize/ppformulanet.py`（別venv `.venv-pp` のワーカー）。空白入りの出力は `tidy_pp` で整える。モデルは PaddleOCR 3.7.0 が配布元から取得する（`PLO_PP_MODEL` で変更、既定 plus-M）。
+- 今後の使い道: UniMERNet と PP-FormulaNet は**構造が違う**ので、「要確認」の2つ目の読み取りに向く可能性がある（未検証）。
+
+**導入手順**（いずれもGit管理外の `.venv-pp/`、`models/pp_cache/`）
+```bash
+/opt/homebrew/bin/python3.12 -m venv .venv-pp
+.venv-pp/bin/pip install --no-cache-dir paddlepaddle==3.3.1 paddleocr==3.7.0 tokenizers ftfy
+# 初回の取得（モデルは models/pp_cache/official_models/ に保存される）
+PADDLE_PDX_CACHE_HOME=$PWD/models/pp_cache PADDLE_PDX_MODEL_SOURCE=huggingface \
+  .venv-pp/bin/python -c "from paddleocr import FormulaRecognition as F; F(model_name='PP-FormulaNet_plus-M')"
+```
+ライセンスは、PaddleOCR・モデルとも Apache-2.0（配布元の表示）。AliceArchiveへ配布する前に再確認する。
+
+**Mathpix（外部サービス）**: `recognize/mathpix.py`。式の画像を `mpx scs convert`（/v3/text）で送る。**同意（`--allow-external`、画面は確認ダイアログ）がなければ、送らずに止まる。** 認証情報は `mpx configure` に任せ、このプログラムは読まない・保存しない。**Mathpix自体の精度は、実教材の画像を外部に送ることになるので、ユーザーの確認なしには測っていない**（試験は、偽の `mpx` で動作だけを確かめた）。
+
+**試験**: `tests/test_engines.py` 12件を追加（全体 206件合格）。同意なしでは送らないこと、`confirm_external` は真偽値 `true` のみ有効なこと、OCR実行中は切り替えないこと、重みや環境がないときの409、区切り記号の除去、出力の整形。
+
+### 参照したMarkdown
+
+AI_LOG.md、MODELS.md、README.md、DESIGN.md、AGENTS.md

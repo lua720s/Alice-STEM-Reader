@@ -64,5 +64,14 @@ PDF上で数式を選択し、編集可能な LaTeX としてコピーできる�
 
 ```bash
 cd このフォルダ && .venv/bin/python -m pdf_latex_overlay viewer 教材フォルダ/ --backend unimernet
+
+### 認識エンジンの選択（PP-FormulaNet / UniMERNet / Mathpix）
+
+上部の「エンジン」で切り替えられる（`--backend unimernet | ppformulanet | mathpix`、`prepare` と `recognize` も同じ）。既定は UniMERNet。
+
+- **UniMERNet**（手元で動く）: 実教材の試験で最もよかった（MODELS.md）。
+- **PP-FormulaNet**（手元で動く）: 公開の評価では高いが、実教材の続きの行（`=` から始まる式）で劣った。`.venv-pp` の導入が要る（MODELS.md）。
+- **Mathpix**（**式の画像を外部に送る**）: 送る前に確認する（画面は確認ダイアログ、コマンドは `--allow-external`）。`mpx configure` で認証情報を設定しておく。認証情報はこのプログラムでは扱わない。
+
 ```
 

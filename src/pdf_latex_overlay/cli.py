@@ -78,7 +78,8 @@ def cmd_viewer(a) -> int:
     from .viewer.server import serve
 
     return serve(a.paths, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
-                 backend=a.backend, workdir=a.workdir, auto=not a.no_auto, readonly=a.readonly, verify=a.verify)
+                 backend=a.backend, workdir=a.workdir, auto=not a.no_auto, readonly=a.readonly, verify=a.verify,
+                 allow_external=a.allow_external)
 
 
 def cmd_recognize(a) -> int:
@@ -95,8 +96,11 @@ def cmd_recognize(a) -> int:
         except RecognizerUnavailable as e:
             print(str(e), file=sys.stderr)
             return 8
+    if a.backend == "mathpix" and not a.allow_external:
+        print("Mathpix は式の画像を外部に送る。同意するなら --allow-external を付ける", file=sys.stderr)
+        return 2
     try:
-        return run_recognition(a.input, a.formulas, a.out, backend=a.backend, workdir=a.workdir,
+        return run_recognition(a.input, a.formulas, a.out, backend=a.backend, allow_external=a.allow_external, workdir=a.workdir,
                                dpi=a.dpi, only_missing=not a.all, should_stop=flag, verifier_obj=ver)
     finally:
         if ver is not None:
@@ -198,7 +202,10 @@ def cmd_prepare(a) -> int:
     def stop():
         return flag() or (a.time_limit is not None and time.monotonic() - t0 > a.time_limit)
 
-    det, be, ver = MFDDetector(), get_backend("unimernet"), None
+    if a.backend == "mathpix" and not a.allow_external:
+        print("Mathpix は式の画像を外部に送る。同意するなら --allow-external を付ける", file=sys.stderr)
+        return PrepareExit.USAGE
+    det, be, ver = MFDDetector(), get_backend(a.backend, **({"allow_external": True} if a.backend == "mathpix" else {})), None
     if a.verify:
         from .recognize.unimernet import make_verifier
 
@@ -275,7 +282,8 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--formulas", default=None, help="式 JSON（なければ作業領域に新規作成）")
     v.add_argument("--workdir", default=None)
     v.add_argument("--port", type=int, default=0)
-    v.add_argument("--backend", default="none", help="再認識のバックエンド（none / unimernet）")
+    v.add_argument("--backend", default="none", help="認識エンジン（none / unimernet / ppformulanet / mathpix）。画面の「エンジン」でも切り替えられる")
+    v.add_argument("--allow-external", action="store_true", help="Mathpix など外部サービスへ画像を送ることに同意する（--backend mathpix に必要）")
     v.add_argument("--no-open", action="store_true")
     v.add_argument("--no-auto", action="store_true", help="開いた時点での全ページ自動認識をしない")
     v.add_argument("--readonly", action="store_true", help="名前の変更・移動・削除・フォルダ作成を受け付けない")
@@ -287,7 +295,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("input")
     r.add_argument("--formulas", required=True)
     r.add_argument("--out", required=True)
-    r.add_argument("--backend", default="unimernet")
+    r.add_argument("--backend", default="unimernet", help="unimernet / ppformulanet / mathpix")
+    r.add_argument("--allow-external", action="store_true", help="Mathpix など外部サービスへ画像を送ることに同意する")
     r.add_argument("--workdir", default=None)
     r.add_argument("--dpi", type=int, default=200)
     r.add_argument("--all", action="store_true", help="LaTeX が既にある式も再認識する")
@@ -308,6 +317,8 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--max-pages", type=int, default=None, help="1つの PDF で処理する最大ページ数")
     pr.add_argument("--time-limit", type=float, default=None, help="全体の上限（秒）。超えたら区切りのよいところで止める")
     pr.add_argument("--verify", action="store_true", help="2つ目のモデルでも読み、食い違った式に「要確認」の印を付ける（約3倍遅い）")
+    pr.add_argument("--backend", default="unimernet", help="認識エンジン（unimernet / ppformulanet / mathpix）")
+    pr.add_argument("--allow-external", action="store_true", help="Mathpix など外部サービスへ画像を送ることに同意する（--backend mathpix に必要）")
     pr.set_defaults(func=cmd_prepare)
 
     lb = sub.add_parser("library", help="事前処理した PDF の一覧")

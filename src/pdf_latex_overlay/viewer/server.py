@@ -115,6 +115,9 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "POST" and path == "/api/fs/trash":
                     b = self._body()
                     return self._json(200, hub.trash(b.get("targets")))
+                if method == "POST" and path == "/api/engine":
+                    b = self._body()
+                    return self._json(200, hub.set_engine(b.get("name"), confirm_external=b.get("confirm_external") is True))
                 if method == "POST" and path == "/api/ocr":
                     b = self._body()
                     return self._json(200, hub.ocr_start(b.get("targets")))
@@ -211,11 +214,11 @@ def make_server(target, port: int = 0):
 
 
 def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True,
-          readonly=False, verify=False) -> int:
+          readonly=False, verify=False, allow_external=False) -> int:
     """paths は PDF またはフォルダ（複数可）。フォルダなら左のコレクションに階層で並ぶ。"""
     paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
     try:
-        hub = Hub(paths, backend=backend, auto_on_open=False, readonly=readonly, verify=verify)
+        hub = Hub(paths, backend=backend, auto_on_open=False, readonly=readonly, verify=verify, allow_external=allow_external)
     except RecognizerUnavailable as e:  # 検証用のモデルがない
         print(str(e), file=sys.stderr)
         return 8

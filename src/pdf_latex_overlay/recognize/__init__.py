@@ -2,6 +2,7 @@
 
 from .base import (  # noqa: F401
     Backend,
+    ENGINES,
     FixedBackend,
     NoneBackend,
     Recognition,

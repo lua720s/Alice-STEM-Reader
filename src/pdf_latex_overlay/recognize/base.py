@@ -44,7 +44,7 @@ class NoneBackend:
     version = "-"
 
     def recognize(self, images_png):
-        raise RecognizerUnavailable("認識バックエンドが設定されていない（--backend unimernet を指定）")
+        raise RecognizerUnavailable("認識バックエンドが設定されていない（--backend unimernet / ppformulanet / mathpix を指定）")
 
 
 class FixedBackend:
@@ -73,4 +73,19 @@ def get_backend(name: str, **kw) -> Backend:
         from .unimernet import UniMERNetBackend
 
         return UniMERNetBackend(**kw)
+    if name == "ppformulanet":
+        from .ppformulanet import PPFormulaNetBackend
+
+        return PPFormulaNetBackend(**kw)
+    if name == "mathpix":
+        from .mathpix import MathpixBackend
+
+        return MathpixBackend(**kw)  # allow_external=True がなければ、送信せずに使えない
     raise ValueError(f"未知の認識バックエンド: {name}")
+
+
+ENGINES = {
+    "unimernet": {"label": "UniMERNet（手元で動く）", "external": False},
+    "ppformulanet": {"label": "PP-FormulaNet（手元で動く）", "external": False},
+    "mathpix": {"label": "Mathpix（画像を外部に送る）", "external": True},
+}

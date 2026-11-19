@@ -34,7 +34,8 @@ def _digest(d) -> str:
 
 
 def run_recognition(input_path, formulas_path, out_path, backend="unimernet", workdir=None, dpi=200,
-                    only_missing=True, should_stop=lambda: False, backend_obj=None, log=None, verifier_obj=None) -> int:
+                    only_missing=True, should_stop=lambda: False, backend_obj=None, log=None, verifier_obj=None,
+                    allow_external=False) -> int:
     log = log or (lambda *a: print(*a, file=sys.stderr))
     inp, out = Path(input_path), Path(out_path)
     if not inp.is_file():
@@ -53,7 +54,7 @@ def run_recognition(input_path, formulas_path, out_path, backend="unimernet", wo
         return RecognizeExit.USAGE
 
     try:
-        be = backend_obj or get_backend(backend)
+        be = backend_obj or get_backend(backend, **({"allow_external": True} if backend == "mathpix" and allow_external else {}))
         if hasattr(be, "start"):
             be.start()
     except RecognizerUnavailable as e:

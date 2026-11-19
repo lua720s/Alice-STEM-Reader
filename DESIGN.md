@@ -72,3 +72,11 @@ macOS 27.0.1、PyMuPDF 2.1（MuPDF 1.28.6）、pikepdf 10.18.2。ベクター・
 ## 出力と再開
 
 入力は読み取り専用。実行ごとに専用作業領域を確保し、入力ハッシュ、設定ハッシュ、モデル版、ページ状態を記録する。再開はこれらが一致した場合に限る。出力先と同じファイルシステムに仮PDFを書き、全検証の後に上書き不可の原子的な操作で公開する。出力先を同時に要求するジョブは衝突として失敗させる。SIGINT/SIGTERMでは新規ページの処理を止め、実行が所有する未公開の一時ファイルだけを整理し、再開情報を残す。OCR結果はデータとして扱い、LaTeXを実行しない。
+
+
+## 認識エンジンの選択（2026-11-19）
+
+- `recognize.ENGINES`（unimernet / ppformulanet / mathpix、`external` は外部送信の有無）。`get_backend(name, **kw)` が作る。
+- PP-FormulaNet は PaddlePaddle の別 venv（`.venv-pp`）で、UniMERNet と同じ JSON Lines のワーカー（`ppformulanet_worker.py`）として動く。
+- Mathpix は `mpx` を子プロセスで呼ぶ。**同意（`allow_external`）がなければ、`_check` が止めて何も送らない。** 同意の置き場所は、CLI の `--allow-external`、画面の確認ダイアログ→ `POST /api/engine` の `confirm_external: true`（真偽値のみ有効、サーバー側でも検査）。
+- `Hub.set_engine` は、OCR・自動認識の実行中は切り替えず（409）、重みや `mpx` がなければ 409 を返して元のエンジンを保つ。`--verify` 中は Mathpix を選べない。

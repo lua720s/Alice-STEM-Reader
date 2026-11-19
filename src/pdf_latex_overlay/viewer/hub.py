@@ -43,9 +43,15 @@ def file_id(path: Path) -> str:
     return hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:12]
 
 
+def engine_list() -> list[dict]:
+    from ..recognize import ENGINES
+
+    return [{"name": k, **v} for k, v in ENGINES.items()]
+
+
 class Hub:
     def __init__(self, roots, backend="none", backend_obj=None, detector=None, library=None, auto_on_open=False,
-                 readonly=False, trash_dir=None, verify=False, verify_backend_obj=None):
+                 readonly=False, trash_dir=None, verify=False, verify_backend_obj=None, allow_external=False):
         self.roots = [Path(r).resolve() for r in roots]
         for r in self.roots:
             if not r.exists():
@@ -58,7 +64,7 @@ class Hub:
             from ..detect.mfd import MFDDetector
             from ..recognize import get_backend
 
-            self.backend_obj = get_backend(backend)  # 読み込みは最初に認識するときまで遅らせる
+            self.backend_obj = get_backend(backend, **({"allow_external": True} if backend == "mathpix" and allow_external else {}))  # 読み込みは最初に認識するときまで遅らせる
             self.detector = detector or MFDDetector()
             self._own_models = True
         # 2つ目のモデル（検証用）。あれば、2つの読み取りが食い違った式に「要確認」の印を付ける
@@ -290,7 +296,7 @@ class Hub:
             loose.sort(key=lambda c: natural_key(c["name"]))
             roots.append({"type": "folder", "name": "開いたPDF", "key": "files", "children": loose})
         return {"roots": roots, "current": self.current_id, "hashing": self.hashing_remaining(),
-                "truncated": truncated, "backend": self.backend_name, "files": len(files),
+                "truncated": truncated, "backend": self.backend_name, "engines": engine_list(), "files": len(files),
                 "readonly": self.readonly, "ocr": self.ocr_status(), "verify": self.verify_obj is not None}
 
     # ---------------------------------------------------------------- ファイル操作（名前の変更・移動・削除・フォルダ作成）
@@ -478,9 +484,46 @@ class Hub:
                     out.append(q)
         return out
 
+    def set_engine(self, name: str, confirm_external: bool = False) -> dict:
+        """認識エンジンを切り替える。OCR や自動認識の実行中は切り替えない。外部サービスは、同意（confirm_external）がなければ拒否する。"""
+        from ..detect.mfd import MFDDetector
+        from ..recognize import ENGINES, get_backend
+
+        if name not in ENGINES:
+            raise SessionError(f"未知のエンジン: {name}")
+        info = ENGINES[name]
+        if info["external"] and not confirm_external:
+            raise SessionError("このエンジンは式の画像を外部のサービスに送る。確認して同意してから選ぶ", 409)
+        with self.lock:
+            if self._ocr and self._ocr["state"] == "running":
+                raise SessionError("OCR を実行中は、エンジンを切り替えられない", 409)
+            if self.session is not None and (self.session.auto.get("state") == "running" or self.session.preparing()):
+                raise SessionError("認識を実行中は、エンジンを切り替えられない（終わってから）", 409)
+            if self.verify_obj is not None and name == "mathpix":
+                raise SessionError("--verify 中は Mathpix を選べない（検証用の2つ目のモデルとの組み合わせは未対応）", 409)
+            try:
+                new = get_backend(name, **({"allow_external": True} if info["external"] else {}))
+                if hasattr(new, "_check"):
+                    new._check()
+            except Exception as e:  # RecognizerUnavailable: 重みや mpx がない
+                raise SessionError(str(e), 409)
+            old, own = self.backend_obj, self._own_models
+            self.backend_obj, self.backend_name = new, name
+            if self.detector is None:
+                self.detector = MFDDetector()
+            self._own_models = True
+            if self.session is not None:
+                self.session._backend, self.session.backend_name = new, name
+            if own and old is not None and hasattr(old, "close"):
+                try:
+                    old.close()
+                except Exception:
+                    pass
+            return {"backend": name, "engines": engine_list()}
+
     def ocr_start(self, targets: list) -> dict:
         if self.detector is None or self.backend_obj is None:
-            raise SessionError("認識モデルが設定されていない（--backend unimernet で起動）", 409)
+            raise SessionError("認識エンジンが選ばれていない（画面の「エンジン」で選ぶか、--backend で起動）", 409)
         if not isinstance(targets, list) or not targets:
             raise SessionError("対象がない")
         with self.lock:
