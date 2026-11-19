@@ -48,6 +48,8 @@ def test_strip_delimiters():
     assert strip_delimiters("\\[\n\\int_0^1 x\\,dx\n\\]\n") == r"\int_0^1 x\,dx"
     assert strip_delimiters("$a$ and $b$") == "a\nb"
     assert strip_delimiters("plain") == "plain"
+    assert strip_delimiters("\\(\\int_{4}^{16}x\\)") == r"\int_{4}^{16}x"
+    assert strip_delimiters("\\(a+b") == "a+b"  # 閉じが欠けた出力
 
 
 def test_tidy_pp():

@@ -258,3 +258,7 @@ PADDLE_PDX_CACHE_HOME=$PWD/models/pp_cache PADDLE_PDX_MODEL_SOURCE=huggingface \
 ### 参照したMarkdown
 
 AI_LOG.md、MODELS.md、README.md、DESIGN.md、AGENTS.md
+
+### Mathpix の実測（2026-11-19、ユーザーの許可を得て、最小限の3式だけ送信）
+
+送ったのは、他のモデルが誤った式を含む実教材の切り抜き3枚（200 dpi）のみ。結果: 2式は正解（`\int_{4}^{16}\sqrt{x}e^{-\sqrt{x}}dx`、`=-52e^{-4}+20e^{-2}=\frac{-52+20e^{2}}{e^{4}}`。UniMERNet tiny が誤った式を含む）、1式は誤読（`\int e^{-t}dt=-e^{-t}+C` が `\partial+,\partial-=pp_{i}\partial\int` に）。**3式では、傾向も言えない。** 出力に `\( … \)` の区切りが残る事例があり、除去を強くした（実画像での再確認は、追加で送らないため未実施。単体試験のみ）。

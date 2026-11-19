@@ -30,7 +30,12 @@ def strip_delimiters(s: str) -> str:
         if found:
             parts = [x.strip() for x in found if x.strip()]
             break
-    return "\n".join(parts) if parts else s
+    if parts:
+        return "\n".join(parts)
+    # 実際の出力で、区切りが残った事例があった（対になる形で見つからない場合）。両端の区切りだけを外す
+    s = re.sub(r"^(?:\\+[(\[]|\$\$?)\s*", "", s)
+    s = re.sub(r"\s*(?:\\+[)\]]|\$\$?)$", "", s)
+    return s.strip()
 
 
 def _run_mpx(png_path: Path, out_path: Path, timeout: float) -> tuple[int, str]:
