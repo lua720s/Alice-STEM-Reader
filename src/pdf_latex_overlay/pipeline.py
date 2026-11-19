@@ -117,6 +117,8 @@ def classify(doc: pymupdf.Document, formulas: list[Formula], opts: Options) -> l
             text = embed.normalize_for_layer(f.latex)
             if coords.clamp_to_page(page, f.rect)[1]:
                 reason = "clipped"
+            elif f.kind == "text" and (f.rect[2] - f.rect[0] < 8 or f.rect[3] - f.rect[1] < 6):
+                reason = "too_small"  # OCR のノイズ（記号の読み違いなど）。小さすぎて矩形選択できない
             elif f.kind == "text" and cjkfont.missing_chars(f.latex):
                 reason = "unsupported_char"  # 同梱フォントにない文字（埋め込めない）
             elif f.kind != "text" and opts.mode == "invisible" and not all(embed.is_winansi_ascii(x) for x in embed.layer_lines(f.latex)):
@@ -211,6 +213,20 @@ def verify(input_path, tmp_path, embedded: list[Formula], opts: Options, input_s
     return checks
 
 
+def _failed_text_ids(checks: dict, failed: list[str], embedded: list[Formula]) -> set[str] | None:
+    """選択・コピーの検証に落ちたのが、文章（kind=text）だけなら、その ID。ほかの検証や数式が落ちたら None。"""
+    if not failed or not set(failed) <= {"mupdf_copy", "pdfkit_copy"}:
+        return None
+    ids = set(checks.get("mupdf_copy", {}).get("failed") or [])
+    ids |= {x["id"] for x in checks.get("pdfkit_copy", {}).get("failed") or [] if isinstance(x, dict)}
+    kinds = {f.id: f.kind for f in embedded}
+    if not ids or any(kinds.get(i) != "text" for i in ids):
+        return None
+    if checks.get("pdfkit_copy", {}).get("error"):
+        return None
+    return ids
+
+
 def process_pdf(input_path, output_path, formulas: FormulaSet | str | Path, options: Options | None = None,
                 should_stop: Callable[[], bool] = lambda: False) -> RunReport:
     opts = options or Options()
@@ -270,18 +286,35 @@ def process_pdf(input_path, output_path, formulas: FormulaSet | str | Path, opti
             raise _Stop(ExitCode.NOTHING, "埋め込める式がない")
 
         tmp = safety.temp_path_for(out)
-        try:
-            embed.embed_formulas(inp, tmp, embedded, mode=opts.mode, should_stop=stop_check)
-        except InterruptedError as e:
-            raise _Stop(ExitCode.INTERRUPTED, str(e))
-        if stop_check():
-            raise _Stop(ExitCode.INTERRUPTED, "検証前に中断")
-
-        checks = verify(inp, tmp, embedded, opts, rep.input_sha256)
-        rep.checks.update(checks)
-        failed = [k for k, v in checks.items() if v.get("ok") is False]
-        if failed:
-            raise _Stop(ExitCode.VERIFY_FAILED, "検証不合格: " + ", ".join(failed))
+        dropped: list[str] = []
+        for attempt in range(4):
+            try:
+                embed.embed_formulas(inp, tmp, embedded, mode=opts.mode, should_stop=stop_check)
+            except InterruptedError as e:
+                raise _Stop(ExitCode.INTERRUPTED, str(e))
+            if stop_check():
+                raise _Stop(ExitCode.INTERRUPTED, "検証前に中断")
+            checks = verify(inp, tmp, embedded, opts, rep.input_sha256)
+            rep.checks.update(checks)
+            failed = [k for k, v in checks.items() if v.get("ok") is False]
+            if not failed:
+                break
+            # 文章（OCR の行）だけが選択・コピーの検証に落ちたときは、その行だけを除いてやり直す（ほかの検証は、すべて通る必要がある）
+            bad = _failed_text_ids(checks, failed, embedded)
+            if not bad or attempt == 3:
+                raise _Stop(ExitCode.VERIFY_FAILED, "検証不合格: " + ", ".join(failed))
+            for f in classified:
+                if f.id in bad:
+                    f.status, f.reason = "excluded", "copy_check_failed"
+            dropped += sorted(bad)
+            embedded = [f for f in classified if f.status == "embedded"]
+            rep.formulas = [f.to_dict() for f in classified]
+            rep.counts = {"total": len(classified), "embedded": len(embedded),
+                          "excluded": sum(1 for f in classified if f.status == "excluded")}
+            if not embedded and not opts.allow_empty:
+                raise _Stop(ExitCode.NOTHING, "埋め込める式がない")
+        if dropped:
+            rep.checks["text_dropped"] = {"ok": True, "ids": dropped}
         if stop_check():
             raise _Stop(ExitCode.INTERRUPTED, "公開前に中断")
 

@@ -161,3 +161,23 @@ def test_session_export_includes_text(fx, tmp_path):
     assert "次の定積分を求めよ" in doc[0].get_text()
     doc.close()
     s.close()
+
+
+def test_too_small_text_is_excluded(fx):
+    doc = pymupdf.open(fx["scan"])
+    tiny = Formula(id="n", page=0, rect=(20, 60, 25, 65), latex="二", kind="text", status="confirmed")  # 「=」の読み違いなどのノイズ
+    out = pipeline.classify(doc, [tiny], pipeline.Options())
+    assert out[0].status == "excluded" and out[0].reason == "too_small"
+    doc.close()
+
+
+def test_failed_text_lines_are_dropped_but_other_failures_still_stop():
+    emb = [Formula(id="t", page=0, rect=(0, 0, 50, 20), latex="a", kind="text"), Formula(id="f", page=0, rect=(0, 30, 50, 50), latex="x")]
+    # 文章だけが選択の検証に落ちた: その行だけを除いてやり直す
+    ids = pipeline._failed_text_ids({"mupdf_copy": {"ok": False, "failed": ["t"]}, "pdfkit_copy": {"ok": True}}, ["mupdf_copy"], emb)
+    assert ids == {"t"}
+    # 数式が落ちた、外観が落ちた、PDFKit がエラー: 除かずに止める（失敗時停止）
+    assert pipeline._failed_text_ids({"mupdf_copy": {"ok": False, "failed": ["f"]}}, ["mupdf_copy"], emb) is None
+    assert pipeline._failed_text_ids({"mupdf_copy": {"ok": False, "failed": ["t"]}, "appearance": {"ok": False}},
+                                     ["mupdf_copy", "appearance"], emb) is None
+    assert pipeline._failed_text_ids({"pdfkit_copy": {"ok": False, "error": "x"}}, ["pdfkit_copy"], emb) is None
