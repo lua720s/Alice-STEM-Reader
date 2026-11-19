@@ -73,14 +73,14 @@ class PPOCRBackend:
         t.join(timeout)
         return None if t.is_alive() or not result else result[0]
 
-    def read(self, png: bytes) -> list[dict]:
-        """画像から、行ごとの {text, score, box:[x0,y0,x1,y1]（画素）} を返す。"""
+    def read(self, png: bytes, words: bool = False) -> list[dict]:
+        """画像から、行ごとの {text, score, box:[x0,y0,x1,y1]（画素）} を返す。words=True なら、行ごとの words（単語・文字の位置）も付く。"""
         with self._lock:
             self.start()
             with tempfile.TemporaryDirectory(prefix="plo-ocr-") as td:
                 p = Path(td) / "page.png"
                 p.write_bytes(png)
-                self.proc.stdin.write(json.dumps({"id": "0", "image": str(p)}) + "\n")
+                self.proc.stdin.write(json.dumps({"id": "0", "image": str(p), "words": words}) + "\n")
                 self.proc.stdin.flush()
                 line = self._readline(self.timeout_s)
                 if line is None:

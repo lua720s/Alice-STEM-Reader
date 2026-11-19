@@ -291,7 +291,7 @@ async function showDetail(f) {
   if (!f) { $("detail").hidden = true; $("empty").hidden = false; return; }
   $("detail").hidden = false; $("empty").hidden = true;
   $("fid").textContent = f.id;
-  $("recognize").hidden = f.kind === "text";  // 文章の枠は、数式の再認識の対象外
+  $("recognize").hidden = f.kind === "text" && f.source !== "mixed";  // 文章の枠は、数式の再認識の対象外（混在の枠は、読み直せる）
   $("fstatus").textContent = f.status;
   $("fsource").textContent = `${f.source}${f.confidence != null ? T(" / 信頼度 {c}", { c: f.confidence.toFixed(2) }) : ""}${f.edited ? T(" / 修正済み") : ""}`;
   if (document.activeElement !== $("latex")) $("latex").value = f.latex || "";

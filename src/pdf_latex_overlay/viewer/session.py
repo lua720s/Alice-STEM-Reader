@@ -54,6 +54,8 @@ class ViewerSession:
         self._auto_thread: threading.Thread | None = None
         self.auto: dict = {"state": "idle"}
         self.text_state: dict = {"state": "idle"}  # 文章（日本語など）の認識
+        self._page_boxes: dict[int, list] = {}  # ページごとの数式検出の結果（混在領域の認識で使い回す）
+        self._text_backend_override = None  # 試験用
         self._text_thread: threading.Thread | None = None
         self._disk_mtime = 0.0
         self.version = 0  # 式の集合が変わるたびに増やす（画面の再読み込み判定）
@@ -207,9 +209,17 @@ class ViewerSession:
         self._check_writable()
         with self.lock:  # 文書への描画だけを排他し、認識中も画面の操作を止めない
             f = self._get(fid)
-            if f.kind == "text":
+            if f.kind == "text" and f.source != "mixed":
                 raise SessionError("文章の枠は、数式として再認識しない（このページの文章を認識、で読み直す）", 409)
             png = crop_png(self._page(f.page), f.rect, dpi=200)
+            page_no, rect = f.page, f.rect
+        mixed = self._try_mixed(page_no, rect)  # 文章と数式が混ざった領域は、Mathpix Snip のように読む
+        if mixed is not None:
+            return self._store_mixed(fid, mixed)
+        if self._get(fid).source == "mixed":  # 混在ではなくなった（数式だけ）。通常の数式として読み直す
+            with self.lock:
+                g = self._get(fid)
+                g.kind, g.source = None, "manual"
         try:
             res = recognize_png(self.backend, png, dpi=200, verifier=self._verifier)
         except RecognizerUnavailable as e:
@@ -231,6 +241,56 @@ class ViewerSession:
                     f.status = "pending"
             self._log("recognize", id=fid, backend=getattr(self.backend, "name", "?"),
                       version=getattr(self.backend, "version", "?"), lines=getattr(res, "lines", 1),
+                      before=before, after=f.to_dict())
+            self._save()
+            self.version += 1
+            return self._view(f)
+
+    def _try_mixed(self, pno: int, rect):
+        """領域に文章（日本語など）が含まれていれば、文章 + 数式（`\\( … \\)`）として読んだ結果。なければ None（数式として読む）。"""
+        from ..detect.mfd import detect_page
+        from ..recognize.mixed import recognize_mixed
+        from ..recognize.textocr import shared_backend
+
+        det = self._detector
+        if det is None or self.backend_name in (None, "", "none") and self._backend is None:
+            return None
+        tb = self._text_backend_override or shared_backend()
+        try:
+            if hasattr(tb, "_check"):
+                tb._check()
+        except RecognizerUnavailable:
+            return None  # 文字認識の環境がない: 従来どおり、数式として読む
+        try:
+            with self.lock:
+                page = self._page(pno)
+                view = tuple(pymupdf.Rect(rect) * page.rotation_matrix)
+                boxes = self._page_boxes.get(pno)
+                if boxes is None:
+                    boxes = detect_page(det, page)  # ページ全体の数式検出（結果は使い回す）
+                    self._page_boxes[pno] = boxes
+            doc = pymupdf.open(self.input)  # この処理専用（PyMuPDF の文書はスレッド間で共有しない）
+            try:
+                return recognize_mixed(doc[pno], view, boxes, self.backend, tb, verifier=self._verifier)
+            finally:
+                doc.close()
+        except RecognizerUnavailable:
+            return None
+        except Exception as e:  # 混在の認識に失敗しても、数式として読む道は残す
+            self._log("mixed_failed", error=f"{type(e).__name__}: {e}")
+            return None
+
+    def _store_mixed(self, fid: str, mixed) -> dict:
+        with self.lock:
+            f = self._get(fid)
+            before = f.to_dict()
+            f.latex = mixed.latex
+            f.ocr_latex = mixed.latex
+            f.kind, f.source, f.edited, f.confidence, f.reason = "text", "mixed", False, None, None
+            f.alt_latex = f.review = None
+            if f.status == "excluded":
+                f.status = "pending"
+            self._log("recognize_mixed", id=fid, lines=len(mixed.items), dropped_boxes=mixed.dropped_boxes,
                       before=before, after=f.to_dict())
             self._save()
             self.version += 1

@@ -206,8 +206,12 @@ def test_hub_tree_shows_review_counts(fx, tmp_path):
     s = h.open(fid)
     s.start_auto(pages=[0], force=True)
     _wait(s)
-    t = h.tree()
-    node = t["roots"][0]["children"][0]
+    for _ in range(200):  # 件数は裏のスレッドが数える。数え終わるまで待つ（待たないと、まれに None で落ちる）
+        t = h.tree()
+        node = t["roots"][0]["children"][0]
+        if node.get("review") is not None and node.get("formulas") is not None:
+            break
+        time.sleep(0.05)
     assert t["verify"] is True and node["review"] == node["formulas"] >= 2
     # OCR のジョブ（ビューアで開いていない PDF）でも、印が付く
     doc2 = pymupdf.open(fx["scan"])

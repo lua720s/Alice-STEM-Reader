@@ -54,14 +54,21 @@ def main():
             t1 = time.monotonic()
             sys.stdout = sys.stderr
             try:
-                res = ocr.predict(req["image"])
+                res = ocr.predict(req["image"], return_word_box=bool(req.get("words")))
             finally:
                 sys.stdout = real_stdout
             lines = []
             if res:
                 r = res[0]
-                for txt, sc, box in zip(r["rec_texts"], r["rec_scores"], r["rec_boxes"]):
-                    lines.append({"text": txt, "score": round(float(sc), 4), "box": [int(v) for v in box]})
+                tw, twr = r.get("text_word") or [], r.get("text_word_region") or []
+                for i, (txt, sc, box) in enumerate(zip(r["rec_texts"], r["rec_scores"], r["rec_boxes"])):
+                    ln = {"text": txt, "score": round(float(sc), 4), "box": [int(v) for v in box]}
+                    if req.get("words") and i < len(tw):  # 文字・単語ごとの位置（混在した領域で、数式と文章を分けるため）
+                        ln["words"] = []
+                        for w, reg in zip(tw[i], twr[i]):
+                            xs, ys = [p[0] for p in reg], [p[1] for p in reg]
+                            ln["words"].append({"text": w, "box": [int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))]})
+                    lines.append(ln)
             emit({"id": req.get("id"), "lines": lines, "error": None, "elapsed_s": round(time.monotonic() - t1, 3)})
         except Exception as e:  # noqa: BLE001
             emit({"id": req.get("id"), "lines": [], "error": f"{type(e).__name__}: {e}", "elapsed_s": None})
