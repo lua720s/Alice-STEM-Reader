@@ -145,3 +145,13 @@ def test_build_app_has_open_with_pdf_and_is_signed(tmp_path):
     assert types["com.adobe.pdf"]["CFBundleTypeRole"] == "Viewer"
     assert subprocess.run(["codesign", "--verify", "--deep", str(app)], capture_output=True).returncode == 0
     assert (app / "Contents" / "Resources" / "Scripts" / "main.scpt").exists()
+
+
+def test_launch_dialog_offers_pdf_and_folder():
+    from pdf_latex_overlay.appbuild import applescript
+
+    src = applescript("/x/python", "/x/log")
+    assert 'choose file of type {"com.adobe.pdf"}' in src and "multiple selections allowed" in src  # PDFを直接選べる
+    assert "choose folder" in src and '"PDFを選ぶ"' in src and '"フォルダを選ぶ"' in src
+    assert "(" not in src.split("buttons", 1)[1].split("default button", 1)[0]  # 括弧が混ざっていない（f-string の波括弧の取り違え）
+    assert "app-open --folder" not in src and '" --folder "' in src
