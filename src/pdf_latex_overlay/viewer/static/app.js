@@ -71,7 +71,9 @@ function drawBoxes() {
       b.className = `box ${f.status}${f.edited ? " edited" : ""}${f.id === state.selected ? " selected" : ""}`;
       Object.assign(b.style, { left: `${x0 * s}px`, top: `${y0 * s}px`, width: `${(x1 - x0) * s}px`, height: `${(y1 - y0) * s}px` });
       b.title = f.latex || "(LaTeX なし)";
-      b.addEventListener("click", (ev) => { if (drawing()) return; ev.stopPropagation(); select(f.id); });
+      b.dataset.id = f.id;
+      // 重なったときは小さい枠を上にして、クリックで選べるようにする
+      b.style.zIndex = String(2 + Math.max(0, 100000 - Math.round((x1 - x0) * (y1 - y0))));
       b.addEventListener("dblclick", (ev) => { ev.stopPropagation(); select(f.id); copyLatex(); });
       div.append(b);
     }
@@ -88,7 +90,9 @@ function renderPreview(latex) {
   const el = $("preview"); el.textContent = "";
   if (!latex) { el.textContent = "（LaTeX なし）"; return; }
   if (window.katex) {
-    try { window.katex.render(latex, el, { throwOnError: false, displayMode: true, trust: false, strict: "ignore" }); return; }
+    const lines = latex.split("\n").filter((x) => x.trim());
+    const src = lines.length > 1 ? `\\begin{gathered}${lines.join("\\\\")}\\end{gathered}` : latex;
+    try { window.katex.render(src, el, { throwOnError: false, displayMode: true, trust: false, strict: "ignore" }); return; }
     catch (e) { /* 下へ */ }
   }
   el.textContent = "（プレビューなし: KaTeX を読み込めない）";
@@ -119,27 +123,32 @@ async function act(fn, okMsg) {
   try { await fn(); await refresh(); if (okMsg) toast(okMsg); } catch (e) { toast(`失敗: ${e.message}`, 4000); }
 }
 
-function drawing() { return $("drawmode").checked || state.redrawFor; }
-
 function attachDraw(div, pno) {
-  let start = null, rubber = null;
+  // Mathpix Snip のように: ドラッグで枠を描く（既存の枠の上からでもよい）。動かさずに離したらクリック扱いで枠を選ぶ。
+  let start = null, rubber = null, moved = false, hitId = null;
   const pos = (ev) => { const r = div.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
   div.addEventListener("mousedown", (ev) => {
-    if (!drawing()) return;
-    ev.preventDefault(); start = pos(ev);
-    rubber = document.createElement("div"); rubber.className = "rubber"; div.append(rubber);
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    start = pos(ev); moved = false;
+    const box = ev.target.closest && ev.target.closest(".box");
+    hitId = box ? box.dataset.id : null;
   });
   window.addEventListener("mousemove", (ev) => {
     if (!start) return;
     const [x, y] = pos(ev);
+    if (!moved && Math.hypot(x - start[0], y - start[1]) < 5) return;
+    if (!moved) { moved = true; rubber = document.createElement("div"); rubber.className = "rubber"; div.append(rubber); }
     Object.assign(rubber.style, { left: `${Math.min(x, start[0])}px`, top: `${Math.min(y, start[1])}px`,
       width: `${Math.abs(x - start[0])}px`, height: `${Math.abs(y - start[1])}px` });
   });
   window.addEventListener("mouseup", async (ev) => {
     if (!start) return;
+    const s0 = start; start = null;
+    if (!moved) { if (hitId) select(hitId); return; }
     const [x, y] = pos(ev), s = pageScale(div);
-    const vr = [Math.min(x, start[0]) / s, Math.min(y, start[1]) / s, Math.max(x, start[0]) / s, Math.max(y, start[1]) / s];
-    start = null; rubber.remove(); rubber = null;
+    if (rubber) { rubber.remove(); rubber = null; }
+    const vr = [Math.min(x, s0[0]) / s, Math.min(y, s0[1]) / s, Math.max(x, s0[0]) / s, Math.max(y, s0[1]) / s];
     if (vr[2] - vr[0] < 3 || vr[3] - vr[1] < 3) return;
     if (state.redrawFor) {
       const id = state.redrawFor; state.redrawFor = null; document.body.classList.remove("drawing");
@@ -147,15 +156,15 @@ function attachDraw(div, pno) {
       return;
     }
     const recognize = state.doc.backend && state.doc.backend !== "none";
+    if (recognize) toast("認識しています…", 30000);
     await act(async () => {
       const f = await api("POST", "/api/formulas", { page: pno, view_rect: vr, recognize });
       state.selected = f.id;
-    }, recognize ? "式を追加して認識しました" : "式を追加しました（LaTeX を入力してください）");
+    }, recognize ? "枠を追加して認識しました" : "枠を追加しました（LaTeX を入力してください）");
   });
 }
 
 function wire() {
-  $("drawmode").addEventListener("change", () => document.body.classList.toggle("drawing", $("drawmode").checked));
   $("latex").addEventListener("input", () => renderPreview($("latex").value));
   $("copy").onclick = copyLatex;
   $("save").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}`, { latex: $("latex").value }), "修正を保存しました");
@@ -172,7 +181,8 @@ function wire() {
     $("export").disabled = true; toast("派生PDFを作成・検証しています…", 60000);
     try {
       const r = await api("POST", "/api/export", { mode: $("mode").value, only_confirmed: $("onlyconfirmed").checked });
-      if (r.ok) toast(`保存しました（埋め込み ${r.counts.embedded} 件、除外 ${r.counts.excluded} 件）\n${r.output}`, 8000);
+      const ex = r.excluded.filter((x) => x.reason && x.reason !== "user").map((x) => `${x.id}: ${x.reason}`);
+      if (r.ok) toast(`保存しました（埋め込み ${r.counts.embedded} 件、除外 ${r.counts.excluded} 件）\n${r.output}${ex.length ? "\n" + ex.join("\n") : ""}`, 10000);
       else toast(`保存しませんでした（終了コード ${r.exit_code}）\n${r.errors.join("\n")}${r.failed_checks.length ? "\n検証不合格: " + r.failed_checks.join(", ") : ""}`, 10000);
     } catch (e) { toast(`失敗: ${e.message}`, 6000); }
     finally { $("export").disabled = false; }
@@ -180,8 +190,7 @@ function wire() {
   document.addEventListener("keydown", (ev) => {
     if (ev.target.tagName === "TEXTAREA" || ev.metaKey || ev.ctrlKey) return;
     if (ev.key === "c" && state.selected) copyLatex();
-    if (ev.key === "d") { $("drawmode").checked = !$("drawmode").checked; $("drawmode").dispatchEvent(new Event("change")); }
-    if (ev.key === "Escape") { state.redrawFor = null; document.body.classList.remove("drawing"); $("drawmode").checked = false; }
+    if (ev.key === "Escape") { state.redrawFor = null; document.body.classList.remove("drawing"); }
   });
 }
 

@@ -24,8 +24,10 @@ main { display: grid; grid-template-columns: 1fr 380px; min-height: calc(100vh -
 .box.confirmed { border-color: var(--ok); }
 .box.selected { border-color: var(--sel); border-width: 2.5px; }
 .box.edited::after { content: "✎"; position: absolute; right: -10px; top: -12px; font-size: 11px; color: var(--warn); }
-.drawing .page { cursor: crosshair; }
-.rubber { position: absolute; border: 1.5px dashed var(--sel); background: rgba(232, 89, 12, .08); pointer-events: none; }
+.page { cursor: crosshair; }
+.box { cursor: pointer; }
+.hint { font-size: 12px; }
+.rubber { position: absolute; z-index: 200000; border: 1.5px dashed var(--sel); background: rgba(232, 89, 12, .08); pointer-events: none; }
 #panel { position: sticky; top: 50px; height: calc(100vh - 50px); overflow: auto; padding: 14px;
   background: var(--panel); border-left: 1px solid var(--line); }
 #detail img { max-width: 100%; border: 1px solid var(--line); background: #fff; margin: 8px 0; }

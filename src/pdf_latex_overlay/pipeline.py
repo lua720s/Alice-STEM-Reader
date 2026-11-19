@@ -42,6 +42,7 @@ class Options:
     require_confirmed: bool = False
     allow_empty: bool = False
     duplicate_iou: float = 0.5
+    overlap_ratio: float = 0.1  # 重なりが小さい方の面積のこの割合を超えたら、片方だけを埋め込む
     timeout_s: float | None = None
     report_path: str | None = None
 
@@ -80,12 +81,28 @@ class _Stop(Exception):
         self.code = code
 
 
+def _priority(f: Formula) -> tuple:
+    """重なった枠のどれを埋め込むか: 確定 > 修正済み > 小さい枠 > 先に作った枠。"""
+    x0, y0, x1, y1 = f.rect
+    return (0 if f.status == "confirmed" else 1, 0 if f.edited else 1, (x1 - x0) * (y1 - y0))
+
+
+def _overlap(a, b) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    small = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return ix * iy / small if small > 0 else 0.0
+
+
 def classify(doc: pymupdf.Document, formulas: list[Formula], opts: Options) -> list[Formula]:
-    """埋め込める式を選び、それ以外は status=excluded と理由を付ける（入力の式は書き換えない）。"""
-    result: list[Formula] = []
-    accepted: dict[int, list[Formula]] = {}
-    for f0 in formulas:
-        f = Formula.from_dict(f0.to_dict())
+    """埋め込める式を選び、それ以外は status=excluded と理由を付ける（入力の式は書き換えない）。
+
+    重なった枠は、優先順位（_priority）の高いものだけを埋め込み、残りは overlaps:<id> で除外する。
+    重ねて埋め込むと、選択したときに両方の文字が混ざるため。
+    """
+    result = [Formula.from_dict(f0.to_dict()) for f0 in formulas]
+    candidates: list[Formula] = []
+    for f in result:
         reason = None
         if f.status in ("excluded", "error"):
             reason = f.reason or f"input_status:{f.status}"
@@ -100,21 +117,32 @@ def classify(doc: pymupdf.Document, formulas: list[Formula], opts: Options) -> l
             text = embed.normalize_for_layer(f.latex)
             if coords.clamp_to_page(page, f.rect)[1]:
                 reason = "clipped"
-            elif opts.mode == "invisible" and not embed.is_winansi_ascii(text):
+            elif opts.mode == "invisible" and not all(embed.is_winansi_ascii(x) for x in embed.layer_lines(f.latex)):
                 reason = "non_ascii_latex"
+            elif not text:
+                reason = "no_latex"
             elif pdfcheck.chars_in_rect(page, f.rect):
                 reason = "existing_text_conflict"
-            else:
-                for g in accepted.get(f.page, []):
-                    if coords.iou(f.rect, g.rect) > opts.duplicate_iou:
-                        reason = f"duplicate_of:{g.id}"
-                        break
+        if reason:
+            f.status, f.reason = "excluded", reason
+        else:
+            candidates.append(f)
+    order = {id(f): i for i, f in enumerate(result)}
+    accepted: dict[int, list[Formula]] = {}
+    for f in sorted(candidates, key=lambda x: (_priority(x), order[id(x)])):
+        reason = None
+        for g in accepted.get(f.page, []):
+            if coords.iou(f.rect, g.rect) > opts.duplicate_iou:
+                reason = f"duplicate_of:{g.id}"
+                break
+            if _overlap(f.rect, g.rect) > opts.overlap_ratio:
+                reason = f"overlaps:{g.id}"
+                break
         if reason:
             f.status, f.reason = "excluded", reason
         else:
             f.status, f.reason = "embedded", None
             accepted.setdefault(f.page, []).append(f)
-        result.append(f)
     return result
 
 
@@ -155,7 +183,8 @@ def verify(input_path, tmp_path, embedded: list[Formula], opts: Options, input_s
         db.close()
 
     got = copycheck.mupdf_extract(tmp_path, embedded)
-    bad = [f.id for f in embedded if got.get(f.id) != embed.normalize_for_layer(f.latex)]
+    bad = [f.id for f in embedded
+           if [x.strip() for x in (got.get(f.id) or "").splitlines() if x.strip()] != embed.layer_lines(f.latex)]
     checks["mupdf_copy"] = {"ok": not bad, "failed": bad}
 
     if opts.pdfkit != "off":
@@ -164,9 +193,9 @@ def verify(input_path, tmp_path, embedded: list[Formula], opts: Options, input_s
                 r = copycheck.pdfkit_select(tmp_path, embedded, page_text=sorted({f.page for f in embedded}))
                 fails = []
                 for f in embedded:
-                    exp = embed.normalize_for_layer(f.latex)
+                    exp = " ".join(embed.layer_lines(f.latex))
                     s = r["selections"].get(f.id)
-                    count = (r["page_text"].get(str(f.page)) or "").count(exp)
+                    count = copycheck.normalize(r["page_text"].get(str(f.page)) or "").count(copycheck.normalize(exp))
                     if copycheck.normalize(s) != copycheck.normalize(exp) or count != 1:
                         fails.append({"id": f.id, "got": s, "page_count": count})
                 checks["pdfkit_copy"] = {"ok": not fails, "failed": fails, "os": r.get("os")}

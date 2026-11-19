@@ -19,10 +19,13 @@ from .. import safety
 from ..models import Formula, FormulaSet
 from ..pipeline import Options, process_pdf
 from ..recognize import RecognizerUnavailable, crop_png, get_backend
-from ..recognize.unimernet import tidy_latex
+from ..coords import iou
+from ..recognize.postprocess import clean_lines
+from ..recognize.region import recognize_region
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 EDITABLE_STATUS = {"pending", "confirmed", "excluded"}
+REPLACE_IOU = 0.6
 
 
 class SessionError(Exception):
@@ -130,8 +133,16 @@ class ViewerSession:
                 n += 1
             f = Formula(id=f"m{page}_{n}", page=page, rect=rect, latex=latex, source="manual",
                         status="pending", edited=latex is not None)
+            # ほぼ同じ位置に描き直した枠は、未確定・未修正の古い枠と置き換える（履歴には残る）
+            replaced = [g for g in self.fs.formulas
+                        if g.page == page and iou(g.rect, rect) > REPLACE_IOU
+                        and g.status != "confirmed" and not g.edited]
+            for g in replaced:
+                self.fs.formulas.remove(g)
+                self._log("replace", id=g.id, by=f.id, before=g.to_dict())
             self.fs.formulas.append(f)
-            self._log("create", id=f.id, page=page, rect=list(rect), latex=latex)
+            self._log("create", id=f.id, page=page, rect=list(rect), latex=latex,
+                      replaced=[g.id for g in replaced])
             self._save()
         if recognize:
             return self.recognize(f.id)
@@ -145,7 +156,7 @@ class ViewerSession:
                 if not isinstance(latex, str) or len(latex) > 20000:
                     raise SessionError("latex が不正")
                 f.latex = latex
-                f.edited = f.ocr_latex is None or latex not in (f.ocr_latex, tidy_latex(f.ocr_latex))
+                f.edited = f.ocr_latex is None or latex not in (f.ocr_latex, clean_lines(f.ocr_latex))
             if status is not None:
                 if status not in EDITABLE_STATUS:
                     raise SessionError(f"status は {sorted(EDITABLE_STATUS)} のいずれか")
@@ -171,26 +182,28 @@ class ViewerSession:
             return crop_png(self._page(f.page), f.rect, dpi=dpi)
 
     def recognize(self, fid: str) -> dict:
-        png = self.crop(fid)
-        try:
-            res = self.backend.recognize([png])[0]
-        except RecognizerUnavailable as e:
-            raise SessionError(str(e), 503)
         with self.lock:
             f = self._get(fid)
+            page, rect = self._page(f.page), f.rect
+            try:
+                res = recognize_region(self.backend, page, rect, dpi=200)
+            except RecognizerUnavailable as e:
+                raise SessionError(str(e), 503)
             before = f.to_dict()
             if res.latex is None:
                 f.reason = f"recognition_failed: {res.error or 'no output'}"
             else:
-                f.ocr_latex = getattr(res, "raw", None) or res.latex  # 認識器の原文
-                f.latex = res.latex  # 空白を詰めた版（意味は変えない）
+                f.ocr_latex = getattr(res, "raw", None) or res.latex  # 認識器の原文（行ごと）
+                f.latex = res.latex  # 表示用の記法を除いた版
                 f.edited = False
                 f.confidence = res.confidence
                 f.source = getattr(self.backend, "name", "unknown")
+                f.reason = f"partial: {res.error}" if res.error else None
                 if f.status == "excluded":
-                    f.status, f.reason = "pending", None
+                    f.status = "pending"
             self._log("recognize", id=fid, backend=getattr(self.backend, "name", "?"),
-                      version=getattr(self.backend, "version", "?"), before=before, after=f.to_dict())
+                      version=getattr(self.backend, "version", "?"), lines=getattr(res, "lines", 1),
+                      before=before, after=f.to_dict())
             self._save()
             return self._view(f)
 

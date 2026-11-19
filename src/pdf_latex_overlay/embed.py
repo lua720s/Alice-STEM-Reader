@@ -33,9 +33,32 @@ def is_winansi_ascii(s: str) -> bool:
     return all(0x20 <= ord(c) < 0x7F for c in s)
 
 
+def layer_lines(latex: str) -> list[str]:
+    """文字層に入れる行。改行で区切り、行内のタブ・連続空白は1つの空白にする（コマンドは変えない）。"""
+    out = []
+    for line in latex.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        t = " ".join(line.replace("\t", " ").split())
+        if t:
+            out.append(t)
+    return out
+
+
 def normalize_for_layer(latex: str) -> str:
-    """文字層に入れる文字列。改行・タブを空白へ（中身のコマンドは変えない）。"""
-    return " ".join(latex.replace("\r", " ").replace("\n", " ").replace("\t", " ").split(" ")).strip()
+    """比較・判定用: 行を改行でつないだ文字層の文字列。"""
+    return "\n".join(layer_lines(latex))
+
+
+def line_rects(page: pymupdf.Page, rect, k: int) -> list[tuple]:
+    """見た目の上下方向に k 等分した帯（保存座標）。複数行の LaTeX を行ごとに置くため。"""
+    if k <= 1:
+        return [tuple(rect)]
+    vis = pymupdf.Rect(rect) * page.rotation_matrix
+    h = vis.height / k
+    out = []
+    for i in range(k):
+        band = pymupdf.Rect(vis.x0, vis.y0 + i * h, vis.x1, vis.y0 + (i + 1) * h) * page.derotation_matrix
+        out.append((band.x0, band.y0, band.x1, band.y1))
+    return out
 
 
 @dataclass
@@ -129,16 +152,16 @@ def embed_formulas(
                 name = ppage.add_resource(font, pikepdf.Name.Font, prefix=FONT_KEY_PREFIX)
                 ops = []
                 for f in by_page[pno]:
-                    text = normalize_for_layer(f.latex)
-                    if mode == "invisible" or actualtext_inner is not None:
-                        inner_ok = is_winansi_ascii(text if actualtext_inner is None else actualtext_inner)
-                    else:
-                        inner_ok = True
-                    layer_text = text if is_winansi_ascii(text) else "?" * max(1, len(text))
-                    if not inner_ok:
-                        raise ValueError(f"{f.id}: 不可視テキストは ASCII のみ対応")
-                    pl = placement(mpage, f.rect, layer_text)
-                    ops += build_ops(name, pl, mode, actual=text, inner=actualtext_inner)
+                    lines = layer_lines(f.latex)
+                    for line, r in zip(lines, line_rects(mpage, f.rect, len(lines))):
+                        inner_text = line if actualtext_inner is None else actualtext_inner
+                        if mode == "invisible" and not is_winansi_ascii(line):
+                            raise ValueError(f"{f.id}: 不可視テキストは ASCII のみ対応")
+                        if actualtext_inner is not None and not is_winansi_ascii(actualtext_inner):
+                            raise ValueError("代替文字は ASCII のみ")
+                        layer_text = line if is_winansi_ascii(line) else "?" * max(1, len(line))
+                        pl = placement(mpage, r, layer_text)
+                        ops += build_ops(name, pl, mode, actual=line, inner=inner_text if mode == "actualtext" else None)
                     done.append(f.id)
                 ppage.contents_add(b"q\n", prepend=True)
                 ppage.contents_add(b"Q\n" + pikepdf.unparse_content_stream(ops) + b"\n", prepend=False)

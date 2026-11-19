@@ -15,7 +15,7 @@
   <strong id="docname">PDF LaTeX Overlay</strong>
   <span id="stats" class="muted"></span>
   <span class="spacer"></span>
-  <label class="toggle"><input type="checkbox" id="drawmode"> 枠を描く（D）</label>
+  <span class="muted hint">ドラッグで枠を追加・クリックで選択</span>
   <select id="mode" title="埋め込み方式">
     <option value="invisible">不可視テキスト（既定）</option>
     <option value="actualtext">ActualText</option>
@@ -26,8 +26,8 @@
 <main>
   <section id="pages" aria-label="ページ"></section>
   <aside id="panel">
-    <div id="empty" class="muted">式の枠をクリックすると、LaTeXの確認・コピー・修正ができます。<br>
-      「枠を描く」をオンにしてページ上をドラッグすると、新しい式を追加できます。</div>
+    <div id="empty" class="muted">ページ上をドラッグすると枠を追加して認識します（複数行も可）。<br>
+      枠をクリックすると、LaTeXの確認・コピー・修正ができます。</div>
     <div id="detail" hidden>
       <div class="row"><b id="fid"></b><span id="fstatus" class="badge"></span><span id="fsource" class="muted"></span></div>
       <img id="crop" alt="元PDFの切り出し">

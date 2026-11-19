@@ -46,7 +46,8 @@ def test_runner_fixed_backend(fx, tmp_path):
     code = run_recognition(fx["scan"], blank, out, backend="fixed", workdir=tmp_path / "w", backend_obj=be, log=lambda *a: None)
     assert code == RecognizeExit.OK and be.calls == 11
     fs = FormulaSet.load(out)
-    assert all(f.latex == r"x ^ { 2 }" and f.ocr_latex == r"x ^ { 2 }" and not f.edited for f in fs.formulas)
+    # 認識器の原文は ocr_latex に残し、latex は空白と表示用の記法を除いた版
+    assert all(f.latex == r"x^{2}" and f.ocr_latex == r"x ^ { 2 }" and not f.edited for f in fs.formulas)
     assert fs.meta["recognition"][-1]["count"] == 11
     # 既存の出力は上書きしない
     assert run_recognition(fx["scan"], blank, out, backend_obj=be, workdir=tmp_path / "w", log=lambda *a: None) == RecognizeExit.SAFETY

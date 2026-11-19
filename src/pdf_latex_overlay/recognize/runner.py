@@ -16,7 +16,8 @@ import pymupdf
 
 from .. import safety
 from ..models import FormulaSet
-from .base import RecognizerUnavailable, crop_png, get_backend
+from .base import RecognizerUnavailable, get_backend
+from .region import recognize_region
 
 
 class RecognizeExit:
@@ -93,7 +94,7 @@ def run_recognition(input_path, formulas_path, out_path, backend="unimernet", wo
                 interrupted = True
                 break
             t0 = time.monotonic()
-            res = be.recognize([crop_png(doc[f.page], f.rect, dpi=dpi)])[0]
+            res = recognize_region(be, doc[f.page], f.rect, dpi=dpi)
             state["done"][f.id] = {
                 "latex": res.latex, "raw": getattr(res, "raw", res.latex), "error": res.error,
                 "elapsed_s": round(time.monotonic() - t0, 3),

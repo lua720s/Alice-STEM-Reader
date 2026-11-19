@@ -93,7 +93,8 @@ def test_pdfkit_body_line_has_no_latex(fx, outputs):
 
 
 def test_layer_text_normalization():
-    assert embed.normalize_for_layer("a\n+\tb") == "a + b"
+    assert embed.layer_lines("a  +\tb\n\n c=d ") == ["a + b", "c=d"]
+    assert embed.normalize_for_layer("a\n+\tb") == "a\n+ b"
     assert embed.is_winansi_ascii(r"\frac{a}{b}")
     assert not embed.is_winansi_ascii("\\text{面積}")
 

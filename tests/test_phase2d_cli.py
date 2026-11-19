@@ -103,7 +103,8 @@ def test_exclusion_reasons(fx, tmp_path):
     rep = process_pdf(src, tmp_path / "o.pdf", fs, Options(**FAST))
     reasons = {f["id"]: f["reason"] for f in rep.formulas}
     assert rep.ok
-    assert reasons["ok"] is None and reasons["dup"] == "duplicate_of:ok"
+    # ほぼ同じ枠は、小さい方（dup）を残し、もう一方を重複として除外する
+    assert reasons["dup"] is None and reasons["ok"] == "duplicate_of:dup"
     assert reasons["jp"] == "non_ascii_latex" and reasons["page"] == "page_out_of_range"
     assert reasons["ex"] == "user" and reasons["unconf"] is None
     rep2 = process_pdf(src, tmp_path / "o2.pdf", fs, Options(require_confirmed=True, **FAST))
