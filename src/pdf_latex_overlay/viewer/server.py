@@ -131,6 +131,22 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "POST" and path == "/api/engine":
                     b = self._body()
                     return self._json(200, hub.set_engine(b.get("name"), confirm_external=b.get("confirm_external") is True))
+                if method == "POST" and path.startswith("/api/vfs/"):  # ビューア専用のフォルダ構造
+                    b = self._body()
+                    op = path[len("/api/vfs/"):]
+                    if op == "mkdir":
+                        return self._json(200, hub.vmkdir(b.get("parent"), b.get("name")))
+                    if op == "rename":
+                        return self._json(200, hub.vrename(b.get("target"), b.get("name")))
+                    if op == "delete":
+                        return self._json(200, hub.vdelete(b.get("target")))
+                    if op == "add":
+                        return self._json(200, hub.vadd(b.get("folder"), b.get("targets")))
+                    if op == "remove":
+                        return self._json(200, hub.vremove(b.get("items")))
+                    if op == "move":
+                        return self._json(200, hub.vmove(b.get("items"), b.get("folders"), b.get("dest")))
+                    return self._json(404, {"error": "not found"})
                 if method == "POST" and path == "/api/ocr":
                     b = self._body()
                     return self._json(200, hub.ocr_start(b.get("targets")))
@@ -148,6 +164,11 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "POST" and path == "/api/auto":
                     b = self._body()  # {"pages": [0 始まりのページ番号], "force": true}（省略すると全ページ）
                     return self._json(200, session.start_auto(pages=b.get("pages"), force=bool(b.get("force"))))
+                if method == "GET" and path == "/api/notes":
+                    return self._json(200, session.notes_get())
+                if method == "POST" and path == "/api/notes":
+                    b = self._body()
+                    return self._json(200, session.notes_set(b.get("scope"), b.get("text"), b.get("page")))
                 if method == "POST" and path == "/api/text":
                     b = self._body()  # {"pages": [0 始まり], "force": true}: 文章（日本語など）を読む
                     return self._json(200, session.start_text(pages=b.get("pages"), force=bool(b.get("force"))))
@@ -155,6 +176,12 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "GET" and m:
                     dpi = int(q.get("dpi", ["110"])[0])
                     return self._send(200, session.page_png(int(m.group(1)), dpi), "image/png")
+                if method == "POST" and path == "/api/formulas/delete_many":
+                    b = self._body()
+                    return self._json(200, session.delete_many(b.get("page"), b.get("scope")))
+                if method == "POST" and path == "/api/formulas/restore":
+                    b = self._body()
+                    return self._json(200, session.restore(b.get("formulas")))
                 m = re.fullmatch(r"/api/formulas/([^/]+)(/recognize|/crop\.png)?", path)
                 if m and not valid_id(m.group(1)):
                     return self._json(400, {"error": "invalid id"})

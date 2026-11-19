@@ -74,6 +74,7 @@
     <div id="selbar" hidden>
       <span id="selcount"></span>
       <button id="sel-ocr" class="primary" type="button" data-i18n="OCRを行う">OCRを行う</button>
+      <button id="sel-vadd" type="button" data-i18n="ビューアのフォルダへ">ビューアのフォルダへ</button>
       <button id="sel-move" type="button" data-i18n="移動">移動</button>
       <button id="sel-trash" class="danger" type="button" data-i18n="ゴミ箱">ゴミ箱</button>
       <button id="sel-clear" type="button" data-i18n="解除">解除</button>
@@ -128,6 +129,15 @@
     <aside id="panel">
       <div id="empty" class="muted"><span data-i18n="PDFを開いたら、上の「このページを認識」で数式を検出・認識します（PDF全体は、⋯ の「OCRを行う」）。"></span><br>
         <span data-i18n="枠をクリックするとLaTeXをコピーし、ここで確認・修正できます。見落とした式は、ページ上をドラッグして追加できます（複数行も可）。"></span></div>
+      <details id="notes" open>
+        <summary data-i18n="メモ">メモ</summary>
+        <div class="seg small" role="group" aria-label="メモの範囲" data-i18n-label="メモの範囲">
+          <button type="button" id="note-doc" data-i18n="このPDF" aria-pressed="true">このPDF</button>
+          <button type="button" id="note-page" aria-pressed="false"><span data-i18n="このページ">このページ</span> <b id="note-pageno"></b></button>
+        </div>
+        <textarea id="notetext" rows="6" spellcheck="false" placeholder="PDFの外に保存する補足説明（PDF自体は変わりません）" data-i18n-ph="PDFの外に保存する補足説明（PDF自体は変わりません）" aria-label="メモ" data-i18n-label="メモ"></textarea>
+        <div class="muted small" id="notestat" role="status"></div>
+      </details>
       <div id="detail" hidden>
         <div class="row"><b id="fid"></b><span id="fstatus" class="badge"></span><span id="fsource" class="muted"></span></div>
         <img id="crop" alt="元PDFの切り出し" data-i18n-alt="元PDFの切り出し">

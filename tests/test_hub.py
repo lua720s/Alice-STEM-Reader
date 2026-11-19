@@ -51,7 +51,7 @@ def test_natural_key():
 def test_tree_hierarchy_and_order(shelf, tmp_path):
     h = _hub(shelf, tmp_path)
     t = h.tree()
-    (root,) = t["roots"]
+    (root,) = [r for r in t["roots"] if not r.get("virtual")]  # 一番下のビューアのフォルダは、別に調べる
     assert root["name"] == "教材" and t["files"] == 7  # .hidden とリンクは除く
     assert _names(root) == ["数学", "物理", "top.pdf"]  # フォルダが先、あとはファイル
     math = root["children"][0]

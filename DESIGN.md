@@ -90,3 +90,9 @@ macOS 27.0.1、PyMuPDF 2.1（MuPDF 1.28.6）、pikepdf 10.18.2。ベクター・
 ## 開いたときの自動認識をやめた（2026-11-19）
 
 ユーザーの指示により、ビューアで PDF を開いても、全ページを自動で検出・認識しない（`serve(auto=False)` が既定、`--auto` で以前の動き）。`.app` の `app-open` も、開くだけで認識しない。認識は「このページを認識」か、⋯ の「OCRを行う」で行う。事前OCR（`prepare`）の結果は、これまでどおり開くと読み込まれる。
+
+## 枠の削除・メモ・ビューア専用のフォルダ（2026-11-19）
+
+- **削除**: `DELETE /api/formulas/<id>` は、消した枠の中身も返す。`POST /api/formulas/restore`（元に戻す）と、`POST /api/formulas/delete_many`（ページ単位、scope は text / all）を追加。履歴（history.jsonl）には、`delete`・`delete_many`・`restore` が残る。
+- **メモ**: `GET/POST /api/notes`。ライブラリの `<ハッシュ>/notes.json`（`{doc, pages:{"0":…}, updated}`）。PDF 本体は変えない。1つ10万文字まで。
+- **ビューア専用のフォルダ**: `viewer/vfs.py`。ライブラリ直下の `collections.json`（`folders`、`items:[{sha, name, folder}]`）。PDF は中身の sha256 で指す（ファイルを動かしても追従）。ツリーの一番下に仮想のルート（キー `v`、フォルダは `v/<id>`）を出し、PDF の行は `rowKey`（`vf:<フォルダ>:<sha>`）で実際の PDF の行と区別する。`/api/vfs/{mkdir,rename,delete,add,remove,move}`。実際のファイルには、一切触れない。

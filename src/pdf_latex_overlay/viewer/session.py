@@ -190,6 +190,43 @@ class ViewerSession:
             self.version += 1
             return self._view(f)
 
+    # ---- メモ（PDFの外、ライブラリの `notes.json` に保存する。PDF 自体は変えない） ----
+    NOTES_MAX = 100_000
+
+    def notes_get(self) -> dict:
+        p = self.workdir / "notes.json"
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = {}
+        pages = d.get("pages") if isinstance(d.get("pages"), dict) else {}
+        return {"doc": d.get("doc") if isinstance(d.get("doc"), str) else "",
+                "pages": {k: v for k, v in pages.items() if isinstance(v, str)}, "updated": d.get("updated")}
+
+    def notes_set(self, scope, text, page=None) -> dict:
+        """scope: doc（PDF全体のメモ）/ page（そのページのメモ）。空の文字列で、そのメモを消す。"""
+        if scope not in ("doc", "page"):
+            raise SessionError("scope が不正（doc か page）")
+        if not isinstance(text, str) or len(text) > self.NOTES_MAX:
+            raise SessionError(f"メモが不正（文字列、{self.NOTES_MAX} 文字まで）")
+        if scope == "page" and (not isinstance(page, int) or isinstance(page, bool) or not (0 <= page < self.doc.page_count)):
+            raise SessionError("page が不正")
+        with self.lock:
+            d = self.notes_get()
+            if scope == "doc":
+                d["doc"] = text
+            elif text.strip():
+                d["pages"][str(page)] = text
+            else:
+                d["pages"].pop(str(page), None)
+            d["updated"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            p = self.workdir / "notes.json"
+            tmp = p.with_name(p.name + ".tmp")
+            tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.replace(p)
+            self._log("notes", scope=scope, page=page, chars=len(text))
+            return d
+
     def delete(self, fid: str) -> dict:
         self._check_writable()
         with self.lock:
@@ -198,7 +235,48 @@ class ViewerSession:
             self._log("delete", id=fid, before=f.to_dict())
             self._save()
             self.version += 1
-            return {"deleted": fid}
+            return {"deleted": fid, "formula": f.to_dict()}  # 元に戻す（restore）ために、枠の中身も返す
+
+    def delete_many(self, page: int, scope: str) -> dict:
+        """そのページの枠をまとめて削除する。scope: text（文章の枠だけ）/ all（すべて）。履歴には残り、restore で戻せる。"""
+        self._check_writable()
+        if scope not in ("text", "all"):
+            raise SessionError("scope が不正（text か all）")
+        if not isinstance(page, int) or isinstance(page, bool) or not (0 <= page < self.doc.page_count):
+            raise SessionError("page が不正")
+        with self.lock:
+            gone = [f for f in self.fs.formulas if f.page == page and (scope == "all" or f.kind == "text")]
+            for f in gone:
+                self.fs.formulas.remove(f)
+            if gone:
+                self._log("delete_many", page=page, scope=scope, ids=[f.id for f in gone], before=[f.to_dict() for f in gone])
+                self._save()
+                self.version += 1
+            return {"deleted": [f.id for f in gone], "formulas": [f.to_dict() for f in gone]}
+
+    def restore(self, formulas) -> dict:
+        """削除した枠を戻す（元に戻す）。同じ ID の枠がすでにあるものは戻さない。"""
+        self._check_writable()
+        if not isinstance(formulas, list) or not formulas or len(formulas) > 5000:
+            raise SessionError("formulas が不正")
+        try:
+            items = [Formula.from_dict(d) for d in formulas]
+        except (ValueError, KeyError, TypeError) as e:
+            raise SessionError(f"枠の形式が不正: {e}")
+        with self.lock:
+            have = {f.id for f in self.fs.formulas}
+            added = []
+            for f in items:
+                if f.id in have or not (0 <= f.page < self.doc.page_count):
+                    continue
+                self.fs.formulas.append(f)
+                have.add(f.id)
+                added.append(f)
+            if added:
+                self._log("restore", ids=[f.id for f in added])
+                self._save()
+                self.version += 1
+            return {"restored": [f.id for f in added]}
 
     def crop(self, fid: str, dpi: int = 200) -> bytes:
         with self.lock:

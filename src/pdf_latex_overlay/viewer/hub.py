@@ -27,6 +27,7 @@ from ..prepare import entry_dir, hold_lock, library_root, lock_holder, prepare_o
 from ..recognize.base import RecognizerUnavailable
 from .fsops import clean_name, move_to_trash
 from .session import SessionError, ViewerSession
+from .vfs import VFS, VFSError
 
 MAX_FILES = 20000
 SKIP_DIRS = {"node_modules", "__pycache__"}
@@ -53,6 +54,7 @@ class Hub:
     def __init__(self, roots, backend="none", backend_obj=None, detector=None, library=None, auto_on_open=False,
                  readonly=False, trash_dir=None, verify=False, verify_backend_obj=None, allow_external=False):
         self.roots = [Path(r).resolve() for r in roots]
+        self._vfs: VFS | None = None  # ビューア専用のフォルダ構造（最初に使うときに読み込む）
         self.last_request = time.monotonic()
         for r in self.roots:
             if not r.exists():
@@ -280,6 +282,80 @@ class Hub:
             node["review"] = c.get("review")
         return node
 
+    # ---------------------------------------------------------------- ビューア専用のフォルダ構造（仮想フォルダ）
+    def _vfs_obj(self) -> VFS:
+        with self.lock:
+            if self._vfs is None:
+                self._vfs = VFS(library_root(self.library) / "collections.json")
+            return self._vfs
+
+    def _sha_paths(self, files) -> dict[str, Path]:
+        out: dict[str, Path] = {}
+        for _, p in files:
+            sha = self._cached_sha(p)
+            if sha and sha not in out:
+                out[sha] = p
+        return out
+
+    def _vfs_node(self, files) -> dict:
+        v = self._vfs_obj()
+        sp = self._sha_paths(files)
+
+        def item_node(it, folder_key):
+            p = sp.get(it["sha"])
+            if p is not None:
+                n = self._file_node(p)
+            else:  # 見つからない PDF（移動・削除された、まだ走査・ハッシュ計算が終わっていない）
+                n = {"type": "file", "id": None, "name": it.get("name") or it["sha"][:8], "state": "missing", "formulas": None,
+                     "with_latex": None, "pages": None, "review": None, "missing": True}
+            n.update(virtual=True, sha=it["sha"], folder_key=folder_key, rowKey=f"vf:{folder_key}:{it['sha'][:16]}")
+            return n
+
+        def kids(folders, items, key):
+            out = [folder_node(f) for f in folders]
+            out += sorted((item_node(i, key) for i in items), key=lambda c: natural_key(c["name"]))
+            return out
+
+        def folder_node(f):
+            return {"type": "folder", "name": f["name"], "key": f["key"], "virtual": True,
+                    "children": kids(f["folders"], f["items"], f["key"])}
+
+        return {"type": "folder", "name": "ビューアのフォルダ", "key": "v", "virtual": True, "vroot": True,
+                "children": kids(v.folder_tree(), v.root_items(), "v")}
+
+    def _vcall(self, fn):
+        try:
+            return fn(self._vfs_obj())
+        except VFSError as e:
+            raise SessionError(str(e), 400)
+
+    def vmkdir(self, parent, name) -> dict:
+        return {"key": self._vcall(lambda v: v.mkdir(parent, name))}
+
+    def vrename(self, target, name) -> dict:
+        self._vcall(lambda v: v.rename(target, name))
+        return {"ok": True}
+
+    def vdelete(self, target) -> dict:
+        return self._vcall(lambda v: v.delete(target))
+
+    def vadd(self, folder, targets) -> dict:
+        """PDF（ID）やフォルダ（キー）を、ビューアのフォルダに登録する。実際のファイルは動かさない。"""
+        if not isinstance(targets, list) or not targets:
+            raise SessionError("対象がない")
+        with self.lock:
+            paths = self._ocr_targets([t for t in targets if isinstance(t, str)])
+            entries = [(self._sha(p), p.name) for p in paths]
+        if not entries:
+            raise SessionError("対象の PDF がない")
+        return {"added": self._vcall(lambda v: v.add(folder, entries)), "found": len(entries)}
+
+    def vremove(self, items) -> dict:
+        return {"removed": self._vcall(lambda v: v.remove(items))}
+
+    def vmove(self, items, folders, dest) -> dict:
+        return {"moved": self._vcall(lambda v: v.move(items, folders, dest))}
+
     def tree(self, refresh: bool = False) -> dict:
         files, truncated = self.scan(force=refresh)
         self._ensure_hashing(files)
@@ -319,6 +395,7 @@ class Hub:
         if loose:
             loose.sort(key=lambda c: natural_key(c["name"]))
             roots.append({"type": "folder", "name": "開いたPDF", "key": "files", "children": loose})
+        roots.append(self._vfs_node(files))  # ビューア専用のフォルダ構造（いつも一番下に出す）
         return {"roots": roots, "current": self.current_id, "hashing": self.hashing_remaining(),
                 "truncated": truncated, "backend": self.backend_name, "engines": engine_list(), "files": len(files),
                 "readonly": self.readonly, "ocr": self.ocr_status(), "verify": self.verify_obj is not None}
@@ -497,7 +574,10 @@ class Hub:
         out: list[Path] = []
         seen: set[Path] = set()
         for t in targets:
-            if t == "files":  # 「開いたPDF」（起動時に指定したファイル）
+            if isinstance(t, str) and (t == "v" or t.startswith("v/")):  # ビューアのフォルダ: 登録された PDF（実在するもの）
+                sp = self._sha_paths(files)
+                cand = [sp[i["sha"]] for i in self._vcall(lambda v: v.folder_items(t)) if i["sha"] in sp]
+            elif t == "files":  # 「開いたPDF」（起動時に指定したファイル）
                 cand = [p for ri, p in files if self.roots[ri].is_file()]
             else:
                 p, isdir = self._resolve(t)

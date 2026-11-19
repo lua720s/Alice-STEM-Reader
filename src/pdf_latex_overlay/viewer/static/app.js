@@ -31,8 +31,14 @@ async function api(method, path, body) {
   return data;
 }
 
-function toast(msg, ms = 2200) {
+function toast(msg, ms = 2200, action = null) {
   const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  t.classList.toggle("has-action", !!action);
+  if (action) {  // 「元に戻す」などのボタンつき
+    const b = document.createElement("button"); b.type = "button"; b.textContent = action.label;
+    b.addEventListener("click", () => { t.classList.remove("show"); action.run(); });
+    t.append(" ", b);
+  }
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), ms);
 }
 
@@ -142,6 +148,7 @@ function setCur(i) {
   if (i === state.cur && $("pageslider").value === String(i + 1)) return;
   state.cur = i;
   updatePageUI();
+  syncNotePage();
   if (state.docId) LS.set(`plo-page:${state.docId}`, String(i));
 }
 
@@ -260,9 +267,46 @@ function drawBoxes() {
       // 重なったときは小さい枠を上にして、クリックで選べるようにする
       b.style.zIndex = String(2 + Math.max(0, 100000 - Math.round((x1 - x0) * (y1 - y0))));
       b.addEventListener("dblclick", (ev) => { ev.stopPropagation(); select(f.id); copyLatex(); });
+      b.addEventListener("contextmenu", (ev) => {  // 右クリック: コピー・削除
+        ev.preventDefault(); ev.stopPropagation(); select(f.id);
+        showMenu(ev.clientX, ev.clientY, [{ label: T("コピー"), run: () => copyLatex() }, "-",
+          { label: T("この枠を削除"), run: () => deleteFormula(f.id), danger: true }], b);
+      });
+      if (f.id === state.selected) {  // 選んだ枠の右上の「×」で、すぐ削除できる
+        const x = document.createElement("button");
+        x.type = "button"; x.className = "box-x"; x.textContent = "×"; x.title = T("この枠を削除（Delete キー）"); x.setAttribute("aria-label", T("この枠を削除"));
+        for (const evn of ["pointerdown", "mousedown", "click", "dblclick"]) x.addEventListener(evn, (ev) => ev.stopPropagation());
+        x.addEventListener("click", () => deleteFormula(f.id));
+        b.append(x);
+      }
       div.append(b);
     }
   }
+}
+
+// ---- 枠の削除（履歴には残り、「元に戻す」で戻せる）
+async function deleteFormula(id) {
+  if (!id) return;
+  try {
+    const r = await api("DELETE", `/api/formulas/${encodeURIComponent(id)}`);
+    if (state.selected === id) state.selected = null;
+    await refresh();
+    toast(T("削除しました"), 8000, { label: T("元に戻す"), run: () => restoreFormulas([r.formula]) });
+  } catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
+}
+async function restoreFormulas(list) {
+  try { await api("POST", "/api/formulas/restore", { formulas: list }); await refresh(); toast(T("元に戻しました"), 1500); }
+  catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
+}
+async function deletePageFormulas(scope) {
+  if (!state.doc) return;
+  try {
+    const r = await api("POST", "/api/formulas/delete_many", { page: state.cur, scope });
+    state.selected = null;
+    await refresh();
+    if (!r.deleted.length) { toast(T("削除する枠がありません"), 1800); return; }
+    toast(T("{n} 個の枠を削除しました", { n: r.deleted.length }), 10000, { label: T("元に戻す"), run: () => restoreFormulas(r.formulas) });
+  } catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
 }
 
 function select(id) {
@@ -375,6 +419,7 @@ window.addEventListener("mouseup", async (ev) => {
 const ICON = {
   folder: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
   file: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/></svg>',
+  star: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9 6.8 19.7l1-5.9L3.5 9.7l5.9-.8z"/></svg>',
   more: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>',
   ocr: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 9h8M8 12h8M8 15h5"/></svg>',
   chev: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
@@ -423,11 +468,11 @@ function renderTree() {
   const add = (node0, depth, parentKey, anc = false) => {
     // 子がフォルダ1つだけの連なりは、1 行にまとめる（深い階層でも名前が読める）
     let node = node0, label = node0.name;
-    while (node.type === "folder" && node.children.length === 1 && node.children[0].type === "folder") {
+    while (node.type === "folder" && !node.vroot && node.children.length === 1 && node.children[0].type === "folder") {  // ビューアのフォルダの一番上は、まとめない（新しいフォルダを作れるように）
       node = node.children[0]; label += ` / ${node.name}`;
     }
     const isFolder = node.type === "folder";
-    const key = isFolder ? node.key : node.id;
+    const key = isFolder ? node.key : (node.rowKey || node.id);
     const open = isFolder && (q ? true : tree.expanded.has(node.key));
     tree.rows.push({ key, node, depth, parentKey, isFolder, open });
     const row = makeRow(node, key, depth, isFolder, open, label, anc);
@@ -447,7 +492,7 @@ function renderTree() {
   if (!tree.rows.some((r) => r.key === tree.focusKey)) tree.focusKey = (tree.rows.find((r) => r.key === t.current) || tree.rows[0] || {}).key || null;
   updateFocus(false);
   t.roots.forEach(annotate);
-  const ready = t.roots.reduce((a, r) => a + r._done, 0);
+  const ready = t.roots.filter((r) => !r.virtual).reduce((a, r) => a + r._done, 0);  // ビューアのフォルダは、同じ PDF を数え直すので除く
   $("tree-foot").textContent = T("{f} 個のPDF・準備済み {r}", { f: t.files, r: ready }) + (t.hashing > 0 ? T("・状態を確認中 {n}", { n: t.hashing }) : "")
     + (t.truncated ? T("・一部のみ表示（上限）") : "");
   updateSelBar();
@@ -460,7 +505,7 @@ function rowBtn(icon, title) {
 }
 
 function makeRow(node, key, depth, isFolder, open, label, anc = false) {
-  const isCur = !isFolder && tree.data && key === tree.data.current;
+  const isCur = !isFolder && tree.data && !!node.id && node.id === tree.data.current;
   const picked = tree.selectMode && (tree.sel.has(key) || anc);
   const row = document.createElement("div");
   row.className = `trow ${isFolder ? "folder" : "file"}${isCur ? " current" : ""}${picked ? " picked" : ""}`;
@@ -477,7 +522,10 @@ function makeRow(node, key, depth, isFolder, open, label, anc = false) {
     row.append(cb);
   }
   const chev = document.createElement("span"); chev.className = `chev${open ? " open" : ""}`; if (isFolder) chev.innerHTML = ICON.chev;
-  const ico = document.createElement("span"); ico.className = "ico"; ico.innerHTML = isFolder ? ICON.folder : ICON.file;
+  const ico = document.createElement("span"); ico.className = "ico"; ico.innerHTML = isFolder ? (node.vroot ? ICON.star : ICON.folder) : ICON.file;
+  if (node.virtual) row.classList.add("virtual");
+  if (node.missing) row.classList.add("missing");
+  attachDrag(row, node, key);
   const name = document.createElement("span"); name.className = "name"; name.textContent = label || node.name;
   row.append(chev, ico, name);
   // 行の右の操作（マウスを乗せたとき）: フォルダ全体のOCR、⋯ メニュー
@@ -498,7 +546,9 @@ function makeRow(node, key, depth, isFolder, open, label, anc = false) {
     tree.focusKey = key;
     if (ev.metaKey || ev.ctrlKey) { if (!tree.selectMode) setSelectMode(true); toggleSel(key); return; }
     if (tree.selectMode) { toggleSel(key); return; }
-    if (isFolder) toggleFolder(node.key); else { updateFocus(false); openDoc(node.id); }
+    if (isFolder) toggleFolder(node.key);
+    else if (!node.id) toast(T("このPDFは見つかりません（移動・削除された可能性があります）。フォルダから外せます"), 4500);
+    else { updateFocus(false); openDoc(node.id); }
   };
   if (isFolder) {
     meta.textContent = node._files ? `${node._done}/${node._files}` : "";
@@ -742,7 +792,7 @@ const noModels = () => !tree.data || !tree.data.backend || tree.data.backend ===
 
 function indexTree() {
   tree.nodes = new Map();
-  const walk = (n) => { tree.nodes.set(n.type === "folder" ? n.key : n.id, n); if (n.type === "folder") n.children.forEach(walk); };
+  const walk = (n) => { tree.nodes.set(n.type === "folder" ? n.key : (n.rowKey || n.id), n); if (n.type === "folder") n.children.forEach(walk); };
   tree.data.roots.forEach(walk);
 }
 function fileIdsUnder(n, out = new Set()) {
@@ -783,11 +833,24 @@ function menuItemsFor(key) {
   const fsItem = (label, run, extra = {}) => ({ label, run, disabled: ro, title: ro ? T("読み取り専用で起動しているため、ファイルは動かせません") : "", ...extra });
   const ocr = { label: n.type === "folder" ? T("OCRを行う（フォルダ全体）") : T("OCRを行う"), run: () => actOcr([key]), disabled: noModel,
     title: noModel ? T("認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）") : "" };
+  if (n.virtual) {  // ビューアのフォルダの中の行: 実際のファイルは動かさない
+    if (n.type === "file") {
+      return [{ ...ocr, run: () => actOcr([key]), disabled: noModel || !n.id }, "-",
+        { label: T("別のビューアのフォルダへ移動"), run: () => actVMove([n]) },
+        { label: T("このフォルダから外す"), run: () => actVRemove([n]), danger: true }];
+    }
+    const items = [ocr, { label: T("新しいフォルダ"), run: () => actVNewFolder(n.key) }];
+    if (!n.vroot) items.push("-", { label: T("名前を変更"), run: () => actVRename(n.key) },
+      { label: T("別のビューアのフォルダへ移動"), run: () => actVMove([n]) },
+      { label: T("このフォルダを削除（PDFは消えません）"), run: () => actVDelete(n.key), danger: true });
+    return items;
+  }
+  const addV = { label: T("ビューアのフォルダに追加…"), run: () => actVAdd([key]) };
   if (n.type === "file") {
-    return [ocr, fsItem(T("名前を変更"), () => actRename(key)), fsItem(T("別の場所へ移動"), () => actMove([key])), "-",
+    return [ocr, addV, fsItem(T("名前を変更"), () => actRename(key)), fsItem(T("別の場所へ移動"), () => actMove([key])), "-",
       fsItem(T("ゴミ箱へ移動"), () => actTrash([key]), { danger: true })];
   }
-  const items = [ocr];
+  const items = [ocr, addV];
   if (key !== "files") items.push(fsItem(T("新しいフォルダ"), () => actNewFolder(key)));
   if (!isRootKey(key)) {
     items.push(fsItem(T("名前を変更"), () => actRename(key)), fsItem(T("別の場所へ移動"), () => actMove([key])), "-",
@@ -851,7 +914,89 @@ async function actNewFolder(parentKey) {
     toast(T("フォルダ「{name}」を作りました", { name: res.name }));
   }
 }
+// ---- ビューア専用のフォルダ構造（PC のフォルダは、そのまま。実際のファイルは動かさない）
+function vfsFolders(excludeKeys = []) {
+  const out = [];
+  const walk = (n, depth) => {
+    if (n.type !== "folder") return;
+    if (excludeKeys.some((k) => n.key === k || n.key.startsWith(`${k}/`))) return;
+    out.push({ key: n.key, name: n.vroot ? T("ビューアのフォルダ") : n.name, depth });
+    n.children.forEach((c) => walk(c, depth + 1));
+  };
+  tree.data.roots.filter((r) => r.vroot).forEach((r) => walk(r, 0));
+  return out;
+}
+async function doV(op, body, okMsg) {
+  try { const r = await api("POST", `/api/vfs/${op}`, body); await loadTree(true); if (okMsg) toast(okMsg(r)); return r; }
+  catch (e) { toast(T("失敗: {m}", { m: e.message }), 5000); return null; }
+}
+async function actVNewFolder(parentKey) {
+  const r = await ask({ title: T("新しいフォルダ"), message: T("ビューアのフォルダを作ります（実際のフォルダは作りません）。"), value: "", placeholder: T("フォルダの名前"), ok: T("作成") });
+  if (!r || !r.value.trim()) return;
+  const res = await doV("mkdir", { parent: parentKey || "v", name: r.value });
+  if (res) { tree.expanded.add(parentKey || "v"); saveExpanded(); renderTree(); }
+}
+async function actVRename(key) {
+  const n = tree.nodes.get(key); if (!n) return;
+  const r = await ask({ title: T("フォルダの名前を変更"), value: n.name, ok: T("変更") });
+  if (!r || !r.value.trim() || r.value.trim() === n.name) return;
+  await doV("rename", { target: key, name: r.value }, () => T("名前を変更しました"));
+}
+async function actVDelete(key) {
+  const n = tree.nodes.get(key); if (!n) return;
+  const r = await ask({ title: T("このフォルダを削除（PDFは消えません）"), message: T("「{name}」と、中のフォルダ・登録を削除します。実際のPDFのファイルは、消えません。", { name: n.name }), ok: T("削除"), danger: true });
+  if (!r) return;
+  await doV("delete", { target: key }, () => T("削除しました"));
+}
+async function actVAdd(keys) {
+  const targets = keys.map((k) => { const n = tree.nodes.get(k); return n && n.virtual ? (n.type === "file" ? n.id : n.key) : k; }).filter(Boolean);
+  if (!targets.length) return;
+  const folders = vfsFolders();
+  const r = await ask({ title: T("ビューアのフォルダに追加"), message: T("追加先を選んでください（実際のファイルは動かしません。同じPDFを、複数のフォルダに入れられます）。"), folders, ok: T("追加") });
+  if (!r || !r.key) return;
+  const res = await doV("add", { folder: r.key, targets });
+  if (res) { tree.expanded.add(r.key); saveExpanded(); renderTree(); tree.sel.clear(); toast(T("{n} 件を追加しました", { n: res.added })); }
+}
+async function actVMove(nodes) {
+  const own = nodes.filter((n) => n.type === "folder").map((n) => n.key);
+  const folders = vfsFolders(own);
+  const r = await ask({ title: T("別のビューアのフォルダへ移動"), message: T("移動先のフォルダを選んでください。"), folders, ok: T("移動") });
+  if (!r || !r.key) return;
+  const items = nodes.filter((n) => n.type === "file").map((n) => ({ folder: n.folder_key, sha: n.sha }));
+  await doV("move", { items, folders: own, dest: r.key }, () => T("移動しました"));
+}
+async function actVRemove(nodes) {
+  const items = nodes.filter((n) => n.type === "file").map((n) => ({ folder: n.folder_key, sha: n.sha }));
+  await doV("remove", { items }, (r) => T("{n} 件をフォルダから外しました", { n: r.removed }));
+}
+// ドラッグ＆ドロップ: 実際の PDF・フォルダを、ビューアのフォルダへ（登録）。ビューアのフォルダの中は、並べ替え（移動）
+function attachDrag(row, node, key) {
+  if (node.vroot) return;
+  row.draggable = true;
+  row.addEventListener("dragstart", (ev) => {
+    const payload = node.virtual ? { kind: node.type === "file" ? "vitem" : "vfolder", node: { type: node.type, key: node.key, folder_key: node.folder_key, sha: node.sha } }
+      : { kind: "real", key: node.type === "folder" ? node.key : node.id };
+    ev.dataTransfer.setData("application/x-plo", JSON.stringify(payload)); ev.dataTransfer.effectAllowed = "copyMove";
+  });
+  if (node.type === "folder" && node.virtual) {
+    row.addEventListener("dragover", (ev) => { if ([...ev.dataTransfer.types].includes("application/x-plo")) { ev.preventDefault(); row.classList.add("dropok"); } });
+    row.addEventListener("dragleave", () => row.classList.remove("dropok"));
+    row.addEventListener("drop", async (ev) => {
+      ev.preventDefault(); row.classList.remove("dropok");
+      let p; try { p = JSON.parse(ev.dataTransfer.getData("application/x-plo")); } catch (e) { return; }
+      if (p.kind === "real") {
+        const res = await doV("add", { folder: node.key, targets: [p.key] });
+        if (res) { tree.expanded.add(node.key); saveExpanded(); renderTree(); toast(T("{n} 件を追加しました", { n: res.added })); }
+      } else {
+        const items = p.kind === "vitem" ? [{ folder: p.node.folder_key, sha: p.node.sha }] : [];
+        await doV("move", { items, folders: p.kind === "vfolder" ? [p.node.key] : [], dest: node.key }, () => T("移動しました"));
+      }
+    });
+  }
+}
+
 async function actOcr(keys) {
+  keys = keys.map((k) => { const n = tree.nodes.get(k); return n && n.virtual && n.type === "file" ? n.id : k; }).filter(Boolean);  // ビューアのフォルダの PDF は、実際の PDF の ID で
   if (noModels()) { toast(T("認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）"), 4000); return; }
   const n = countFiles(keys);
   if (!n) { toast(T("対象のPDFがありません")); return; }
@@ -939,7 +1084,51 @@ async function loadDoc(knownEmpty = false) {
   requestAnimationFrame(() => { goto(state.cur, false); updatePageUI(); });
   await refresh();
   updateAutoStatus();  // 「未処理」の表示と、「このページを認識」の強調を、開いてすぐ反映する
+  loadNotes();
 }
+
+// ============================================================ メモ（PDFの外に保存。PDF全体と、ページごと）
+const notes = { data: { doc: "", pages: {} }, scope: "doc", timer: 0, dirty: false };
+function noteKey() { return notes.scope === "doc" ? null : state.cur; }
+function showNote() {
+  const ta = $("notetext");
+  ta.value = notes.scope === "doc" ? (notes.data.doc || "") : (notes.data.pages[String(state.cur)] || "");
+  $("note-doc").setAttribute("aria-pressed", String(notes.scope === "doc"));
+  $("note-page").setAttribute("aria-pressed", String(notes.scope === "page"));
+  $("note-pageno").textContent = `(${state.cur + 1})`;
+  ta.disabled = !state.doc;
+}
+function syncNotePage() {
+  $("note-pageno").textContent = `(${state.cur + 1})`;
+  if (notes.scope === "page") { if (notes.dirty) saveNote().then(showNote); else showNote(); }  // 書きかけのメモは、元のページに保存してから切り替える
+}
+async function loadNotes() {
+  notes.data = { doc: "", pages: {} }; notes.dirty = false;
+  if (state.doc) { try { notes.data = await api("GET", "/api/notes"); } catch (e) { /* 次回 */ } }
+  showNote(); $("notestat").textContent = "";
+}
+async function saveNote() {
+  clearTimeout(notes.timer);
+  if (!notes.dirty || !state.doc) return;
+  const tg = notes.target || { scope: notes.scope, page: state.cur };
+  const scope = tg.scope, page = tg.page, text = notes.draft;
+  notes.dirty = false;
+  try {
+    notes.data = await api("POST", "/api/notes", { scope, page: scope === "page" ? page : undefined, text });
+    $("notestat").textContent = T("メモを保存しました");
+  } catch (e) { notes.dirty = true; $("notestat").textContent = T("メモを保存できません: {m}", { m: e.message }); }
+}
+$("notetext").addEventListener("input", () => {
+  notes.dirty = true; notes.target = { scope: notes.scope, page: state.cur }; notes.draft = $("notetext").value;
+  $("notestat").textContent = T("入力中…");
+  if (notes.scope === "doc") notes.data.doc = $("notetext").value; else notes.data.pages[String(state.cur)] = $("notetext").value;
+  clearTimeout(notes.timer); notes.timer = setTimeout(saveNote, 800);
+});
+$("notetext").addEventListener("blur", saveNote);
+for (const [id, scope] of [["note-doc", "doc"], ["note-page", "page"]]) {
+  $(id).addEventListener("click", async () => { await saveNote(); notes.scope = scope; showNote(); });
+}
+window.addEventListener("beforeunload", () => { if (notes.dirty) saveNote(); });
 
 // ============================================================ 画面の操作
 function wire() {
@@ -950,11 +1139,7 @@ function wire() {
   $("exclude").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}`, { status: "excluded", reason: "user" }), T("除外しました"));
   $("recognize").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}/recognize`), T("再認識しました"));
   $("redraw").onclick = () => { state.redrawFor = state.selected; toast(T("ページ上で新しい枠をドラッグしてください")); };
-  $("delete").onclick = () => {
-    if (!confirm(T("{id} を削除しますか？（履歴には残ります）", { id: state.selected }))) return;
-    const id = state.selected; state.selected = null;
-    act(() => api("DELETE", `/api/formulas/${encodeURIComponent(id)}`), T("削除しました"));
-  };
+  $("delete").onclick = () => deleteFormula(state.selected);  // 確認はせず、「元に戻す」を出す
   // 「このページを認識」: いま表示しているページだけを検出・認識する（PDF全体は、⋯ の「OCRを行う」）
   $("autorun").onclick = () => {
     if (!state.doc) return;
@@ -975,11 +1160,14 @@ function wire() {
   const renameTitle = () => { if (state.docId) actRename(state.docId); };
   $("docname").addEventListener("click", renameTitle);
   $("docname").addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === "F2") { ev.preventDefault(); renameTitle(); } });
-  $("doc-menu").onclick = () => menuAt($("doc-menu"), state.docId ? menuItemsFor(state.docId) : []);
+  $("doc-menu").onclick = () => menuAt($("doc-menu"), state.docId ? [...menuItemsFor(state.docId), "-",
+    { label: T("このページの文章の枠をすべて削除"), run: () => deletePageFormulas("text"), danger: true },
+    { label: T("このページの枠をすべて削除"), run: () => deletePageFormulas("all"), danger: true }] : []);
   $("tree-newfolder").onclick = () => actNewFolder(defaultFolderKey());
   $("tree-select").onclick = () => setSelectMode(!tree.selectMode);
   $("sel-ocr").onclick = () => actOcr([...tree.sel]);
-  $("sel-move").onclick = () => actMove([...tree.sel]);
+  $("sel-vadd").onclick = () => actVAdd([...tree.sel]);
+  $("sel-move").onclick = () => actMove([...tree.sel].filter((k) => !(tree.nodes.get(k) || {}).virtual));
   $("sel-trash").onclick = () => actTrash([...tree.sel]);
   $("sel-clear").onclick = () => { tree.sel.clear(); renderTree(); };
   $("ocr-cancel").onclick = async () => { try { renderOcrBar(await api("POST", "/api/ocr/cancel")); } catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); } };
@@ -1020,6 +1208,7 @@ function wire() {
       case "b": setSidebar(!$("layout").classList.contains("sb-open"), true); break;
       case "/": $("tree-filter").focus(); $("tree-filter").select(); break;
       case "c": if (state.selected) copyLatex(); else handled = false; break;
+      case "Delete": case "Backspace": if (state.selected) deleteFormula(state.selected); else handled = false; break;
       case "n": case "N": nextReview(ev.shiftKey || ev.key === "N" ? -1 : 1); break;
       default: handled = false;
     }
