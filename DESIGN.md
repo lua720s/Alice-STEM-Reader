@@ -80,3 +80,9 @@ macOS 27.0.1、PyMuPDF 2.1（MuPDF 1.28.6）、pikepdf 10.18.2。ベクター・
 - PP-FormulaNet は PaddlePaddle の別 venv（`.venv-pp`）で、UniMERNet と同じ JSON Lines のワーカー（`ppformulanet_worker.py`）として動く。
 - Mathpix は `mpx` を子プロセスで呼ぶ。**同意（`allow_external`）がなければ、`_check` が止めて何も送らない。** 同意の置き場所は、CLI の `--allow-external`、画面の確認ダイアログ→ `POST /api/engine` の `confirm_external: true`（真偽値のみ有効、サーバー側でも検査）。
 - `Hub.set_engine` は、OCR・自動認識の実行中は切り替えず（409）、重みや `mpx` がなければ 409 を返して元のエンジンを保つ。`--verify` 中は Mathpix を選べない。
+
+## .app と常駐ビューア（2026-11-19）
+
+- `appbuild.py`: AppleScript のアプレットを `osacompile` で作り、Info.plist に PDF・フォルダの文書タイプ（`LSHandlerRank = Alternate`）を足して ad-hoc 署名、LaunchServices に登録。`on open` が `app-open` を呼ぶ。
+- `applaunch.py`: 状態ファイル（`~/Library/Application Support/PDF LaTeX Overlay/server.json`、権限600、ポート・トークン）で、動いているビューアを探す。動いていれば `POST /api/addfiles` で PDF を加え、`POST /api/open`（`auto: true`）で開く。直前まで画面の通信があれば、ブラウザのタブは増やさない（画面が開いた PDF に追従する）。
+- サーバー: `GET /api/ping`（pid・無通信秒数）、`POST /api/quit`、`--idle-exit 分`（無通信で自動終了）、`--state-file`。どれもトークンが要る。

@@ -53,6 +53,7 @@ class Hub:
     def __init__(self, roots, backend="none", backend_obj=None, detector=None, library=None, auto_on_open=False,
                  readonly=False, trash_dir=None, verify=False, verify_backend_obj=None, allow_external=False):
         self.roots = [Path(r).resolve() for r in roots]
+        self.last_request = time.monotonic()
         for r in self.roots:
             if not r.exists():
                 raise SessionError(f"パスが見つからない: {r}", 404)
@@ -151,6 +152,29 @@ class Hub:
                 self.index = {file_id(p): p for _, p in files}
                 self.folders = {self._dir_key(ri, d): d for ri, d in dirs}
             return self._scan[1], self._scan[2]
+
+    def add_paths(self, paths) -> list[str]:
+        """Finder の「このアプリケーションで開く」などで渡された PDF を、一覧（「開いたPDF」）に加える。IDを返す。"""
+        if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
+            raise SessionError("paths は文字列のリスト")
+        ids = []
+        with self.lock:
+            for p in paths:
+                q = Path(p).expanduser()
+                if q.is_symlink() or not q.is_file() or q.suffix.lower() != ".pdf":
+                    raise SessionError(f"PDF ではない、または見つからない: {q.name}", 400)
+                q = q.resolve()
+                if not any((r.is_file() and r == q) or (r.is_dir() and q.is_relative_to(r)) for r in self.roots):
+                    self.roots.append(q)
+                ids.append(file_id(q))
+            self.scan(force=True)
+        return ids
+
+    def touch(self):
+        self.last_request = time.monotonic()
+
+    def idle_s(self) -> float:
+        return time.monotonic() - self.last_request
 
     def id_of(self, path) -> str:
         return file_id(Path(path).resolve())

@@ -79,7 +79,56 @@ def cmd_viewer(a) -> int:
 
     return serve(a.paths, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
                  backend=a.backend, workdir=a.workdir, auto=not a.no_auto, readonly=a.readonly, verify=a.verify,
-                 allow_external=a.allow_external)
+                 allow_external=a.allow_external, state_file=a.state_file, idle_exit_min=a.idle_exit)
+
+
+def cmd_app_open(a) -> int:
+    """Finder の「このアプリケーションで開く」や .app から呼ばれる。動いているビューアがあれば再利用する。"""
+    from . import applaunch
+
+    if a.print_last:
+        print(applaunch.last_folder() or "")
+        return 0
+    if a.if_running:
+        st = applaunch.running_state()
+        if not st:
+            return 1
+        if st.get("idle_s", 999) > 8:
+            applaunch.webbrowser.open(st["url"])
+        return 0
+    from pathlib import Path
+
+    files = [p for p in a.paths if not Path(p).expanduser().is_dir()]
+    dirs = [p for p in a.paths if Path(p).expanduser().is_dir()]
+    try:
+        res = applaunch.app_open(files=files, folder=a.folder or (dirs[0] if dirs else None), backend=a.backend)
+    except (ValueError, RuntimeError) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    _print(res)
+    return 0
+
+
+def cmd_app_stop(a) -> int:
+    from . import applaunch
+
+    print("止めた" if applaunch.app_stop() else "動いていない")
+    return 0
+
+
+def cmd_build_app(a) -> int:
+    from .appbuild import build_app
+
+    try:
+        app = build_app(a.dest, register=not a.no_register)
+    except (RuntimeError, OSError) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    except Exception as e:  # subprocess.CalledProcessError など
+        print(f"作成に失敗: {e}\n{getattr(e, 'stderr', '')}", file=sys.stderr)
+        return 2
+    print(f"作成した: {app}")
+    return 0
 
 
 def cmd_recognize(a) -> int:
@@ -285,11 +334,27 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--backend", default="none", help="認識エンジン（none / unimernet[=base] / unimernet_tiny / ppformulanet / mathpix）。画面の「エンジン」でも切り替えられる")
     v.add_argument("--allow-external", action="store_true", help="Mathpix など外部サービスへ画像を送ることに同意する（--backend mathpix に必要）")
     v.add_argument("--no-open", action="store_true")
+    v.add_argument("--state-file", default=None, help="接続情報（ポート・トークン）を書き出す場所（.app 用）")
+    v.add_argument("--idle-exit", type=float, default=None, metavar="分", help="画面からの通信がこの分数なければ終了する（.app 用）")
     v.add_argument("--no-auto", action="store_true", help="開いた時点での全ページ自動認識をしない")
     v.add_argument("--readonly", action="store_true", help="名前の変更・移動・削除・フォルダ作成を受け付けない")
     v.add_argument("--verify", action="store_true",
                    help="2つ目のモデル（既定 models/unimernet_tiny）でも読み、食い違った式に「要確認」の印を付ける（約3倍遅い）")
     v.set_defaults(func=cmd_viewer)
+
+    ao = sub.add_parser("app-open", help="（.app 用）動いているビューアでPDFやフォルダを開く。なければ起動する")
+    ao.add_argument("paths", nargs="*", help="PDF またはフォルダ")
+    ao.add_argument("--folder", default=None)
+    ao.add_argument("--backend", default="unimernet")
+    ao.add_argument("--if-running", action="store_true", help="動いていれば画面を開いて終了コード0、動いていなければ1")
+    ao.add_argument("--print-last", action="store_true", help="前回開いたフォルダを表示する")
+    ao.set_defaults(func=cmd_app_open)
+    ast = sub.add_parser("app-stop", help="（.app 用）常駐しているビューアを止める")
+    ast.set_defaults(func=cmd_app_stop)
+    ba = sub.add_parser("build-app", help="macOS の .app を作る（Finder の「このアプリケーションで開く」に出る）")
+    ba.add_argument("--dest", default="~/Applications", help="作る場所（既定: ~/Applications）")
+    ba.add_argument("--no-register", action="store_true", help="LaunchServices に登録しない")
+    ba.set_defaults(func=cmd_build_app)
 
     r = sub.add_parser("recognize", help="式の矩形を切り出して LaTeX を認識する")
     r.add_argument("input")

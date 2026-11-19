@@ -10,9 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import os
 import re
 import secrets
 import sys
+import threading
+import time
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -77,6 +80,7 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
         def _dispatch(self, method: str):
             if not self._host_ok():
                 return self._json(403, {"error": "host not allowed"})
+            hub.touch()
             u = urlparse(self.path)
             path = u.path
             q = parse_qs(u.query)
@@ -98,9 +102,18 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 # ---- コレクション（フォルダの階層）と、開く PDF の切り替え ----
                 if method == "GET" and path == "/api/tree":
                     return self._json(200, hub.tree(refresh=q.get("refresh", ["0"])[0] == "1"))
+                if method == "GET" and path == "/api/ping":
+                    return self._json(200, {"ok": True, "pid": os.getpid(), "idle_s": round(hub.idle_s(), 1)})
+                if method == "POST" and path == "/api/quit":
+                    self._json(200, {"ok": True})
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
+                if method == "POST" and path == "/api/addfiles":
+                    b = self._body()
+                    return self._json(200, {"ids": hub.add_paths(b.get("paths"))})
                 if method == "POST" and path == "/api/open":
                     b = self._body()
-                    hub.open(b.get("id"))
+                    hub.open(b.get("id"), auto=(b["auto"] if isinstance(b.get("auto"), bool) else None))
                     return self._json(200, {"id": hub.current_id})
                 # ---- ファイル操作（フォルダ作成・名前の変更・移動・ゴミ箱へ）と、OCR のジョブ ----
                 if method == "POST" and path == "/api/fs/mkdir":
@@ -214,7 +227,7 @@ def make_server(target, port: int = 0):
 
 
 def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True,
-          readonly=False, verify=False, allow_external=False) -> int:
+          readonly=False, verify=False, allow_external=False, state_file=None, idle_exit_min=None) -> int:
     """paths は PDF またはフォルダ（複数可）。フォルダなら左のコレクションに階層で並ぶ。"""
     paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
     try:
@@ -245,6 +258,18 @@ def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", 
     print(f"ビューア: {url}\n作業領域: {where}\n終了は Ctrl+C", flush=True)
     if open_browser:
         webbrowser.open(url)
+    if state_file:  # アプリ（.app）から再利用するための、接続情報。自分だけが読める
+        _write_state(Path(state_file), {"pid": os.getpid(), "port": httpd.server_address[1], "token": token, "url": url})
+    if idle_exit_min:  # 画面からの通信が一定時間なければ終了する（ブラウザを閉じたまま残らないように）
+        def _watch():
+            while True:
+                time.sleep(min(15.0, max(0.2, idle_exit_min * 15)))
+                if hub.idle_s() > idle_exit_min * 60:
+                    print(f"{idle_exit_min} 分間操作がないので終了します", file=sys.stderr, flush=True)
+                    httpd.shutdown()
+                    return
+
+        threading.Thread(target=_watch, daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -252,4 +277,20 @@ def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", 
     finally:
         httpd.server_close()
         hub.close()
+        if state_file:
+            try:
+                st = json.loads(Path(state_file).read_text(encoding="utf-8"))
+                if st.get("pid") == os.getpid():
+                    Path(state_file).unlink()
+            except (OSError, ValueError):
+                pass
     return 0
+
+
+def _write_state(path: Path, obj: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(obj, f)
+    os.replace(tmp, path)
