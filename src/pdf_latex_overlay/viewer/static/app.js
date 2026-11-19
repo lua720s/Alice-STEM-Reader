@@ -2,6 +2,7 @@
 // OCR 結果やファイル名はデータとして扱う: textContent / textarea にだけ入れ、HTML として解釈しない（アイコンは固定の文字列のみ）。
 "use strict";
 
+const T = (k, v) => (window.ploI18n ? window.ploI18n.t(k, v) : k);
 const token = new URLSearchParams(location.hash.slice(1)).get("token") || sessionStorage.getItem("plo-token") || "";
 if (token) { sessionStorage.setItem("plo-token", token); history.replaceState(null, "", location.pathname); }
 
@@ -21,7 +22,7 @@ async function api(method, path, body) {
   if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
   let r;
   try { r = await fetch(path, opt); }
-  catch (e) { setConn(false); throw new Error(CONN_MSG); }  // 「Failed to fetch」: サーバーに届かなかった
+  catch (e) { setConn(false); throw new Error(T("ビューアに接続できません（終了したか、起動し直して接続先が変わった可能性があります）")); }  // 「Failed to fetch」: サーバーに届かなかった
   setConn(true);
   const ct = r.headers.get("Content-Type") || "";
   const data = ct.startsWith("application/json") ? await r.json() : await r.blob();
@@ -37,11 +38,10 @@ function toast(msg, ms = 2200) {
 // ============================================================ 接続の状態
 // ビューアが終了した、または起動し直して接続先（ポート・トークン）が変わると、ブラウザは「Failed to fetch」を返す。
 // 何が起きたかを画面に出し、つながり直したら自動で消す。
-const CONN_MSG = "ビューアに接続できません（終了したか、起動し直して接続先が変わった可能性があります）";
 let connOk = true;
 function setConn(ok) { if (ok === connOk) return; connOk = ok; $("conn").hidden = ok; }
 $("conn-retry").addEventListener("click", async () => {
-  try { await loadTree(true); toast("再接続しました", 1500); } catch (e) { toast("まだ接続できません。ビューアが動いているか確認してください", 3500); }
+  try { await loadTree(true); toast(T("再接続しました"), 1500); } catch (e) { toast(T("まだ接続できません。ビューアが動いているか確認してください"), 3500); }
 });
 
 // 上のバーの実際の高さ（折り返すと増える）を CSS に伝える。狭い画面のコレクションの位置などに使う
@@ -55,7 +55,7 @@ function syncThemeButtons() {
 document.querySelectorAll("[data-theme-set]").forEach((b) => b.addEventListener("click", () => {
   if (window.ploTheme) window.ploTheme.set(b.dataset.themeSet);
   syncThemeButtons();
-  toast({ system: "テーマ: 自動（OSに合わせる）", light: "テーマ: ライト", dark: "テーマ: ダーク" }[b.dataset.themeSet], 1200);
+  toast(T({ system: "テーマ: 自動（OSに合わせる）", light: "テーマ: ライト", dark: "テーマ: ダーク" }[b.dataset.themeSet]), 1200);
 }));
 syncThemeButtons();
 
@@ -76,7 +76,7 @@ function buildDeck() {
   slots = state.doc.pages.map((p, pno) => {
     const slot = document.createElement("div"); slot.className = "slot"; slot.dataset.page = pno;
     const page = document.createElement("div"); page.className = "page"; page.dataset.page = pno;
-    const img = document.createElement("img"); img.alt = `ページ ${pno + 1}`; img.draggable = false; img.dataset.dpi = "0";
+    const img = document.createElement("img"); img.alt = T("ページ {n}", { n: pno + 1 }); img.draggable = false; img.dataset.dpi = "0";
     page.append(img); slot.append(page); pagesEl.append(slot);
     attachDraw(page, pno);
     imgObserver.observe(slot);
@@ -188,9 +188,9 @@ async function refresh() {
   state.formulas = d.formulas;
   drawBoxes();
   const n = state.formulas.length, conf = state.formulas.filter((f) => f.status === "confirmed").length;
-  $("stats").textContent = `式 ${n} 件・確定 ${conf} 件${state.doc.verify ? "・2モデルで検証" : ""}`;
+  $("stats").textContent = T("式 {n} 件・確定 {c} 件", { n, c: conf }) + (state.doc.verify ? T("・2モデルで検証") : "");
   const rv = reviewList().length;
-  $("reviewbtn").hidden = rv === 0; $("reviewcount").textContent = String(rv);
+  $("reviewbtn").hidden = rv === 0; $("reviewcount").textContent = T("要確認 {n} 件 →", { n: rv });
   if (state.selected) showDetail(state.formulas.find((f) => f.id === state.selected));
 }
 
@@ -198,12 +198,12 @@ async function refresh() {
 const reviewList = () => state.formulas.filter((f) => f.review && f.status !== "excluded" && f.view_rect)
   .sort((a, b) => a.page - b.page || a.view_rect[1] - b.view_rect[1] || a.view_rect[0] - b.view_rect[0]);
 const REVIEW_WHY = {
-  disagree: "2つのモデルの読み取りが食い違っています。元の画像と見比べて確認してください。",
-  failed: "どちらかのモデルが読み取れませんでした。確認してください。",
+  get disagree() { return T("2つのモデルの読み取りが食い違っています。元の画像と見比べて確認してください。"); },
+  get failed() { return T("どちらかのモデルが読み取れませんでした。確認してください。"); },
 };
 function nextReview(dir = 1) {
   const list = reviewList();
-  if (!list.length) { toast("要確認の式はありません"); return; }
+  if (!list.length) { toast(T("要確認の式はありません")); return; }
   const cur = list.findIndex((f) => f.id === state.selected);
   let i;
   if (cur >= 0) i = (cur + dir + list.length) % list.length;
@@ -212,7 +212,7 @@ function nextReview(dir = 1) {
   if (f.page !== state.cur) goto(f.page);
   select(f.id);
   setTimeout(() => { const b = document.querySelector(`.box[data-id="${CSS.escape(f.id)}"]`); if (b) b.scrollIntoView({ block: "nearest", inline: "nearest" }); }, 60);
-  toast(`要確認 ${i + 1} / ${list.length}`, 1200);
+  toast(T("要確認 {i} / {n}", { i: i + 1, n: list.length }), 1200);
 }
 
 function pageScale(div) { const p = state.doc.pages[+div.dataset.page]; return div.clientWidth / p.width; }
@@ -227,7 +227,7 @@ function drawBoxes() {
       const b = document.createElement("div");
       b.className = `box ${f.status}${f.edited ? " edited" : ""}${f.review ? " review" : ""}${f.id === state.selected ? " selected" : ""}`;
       Object.assign(b.style, { left: `${x0 * s}px`, top: `${y0 * s}px`, width: `${(x1 - x0) * s}px`, height: `${(y1 - y0) * s}px` });
-      b.title = f.latex || "(LaTeX なし)";
+      b.title = f.latex || T("(LaTeX なし)");
       b.dataset.id = f.id;
       // 重なったときは小さい枠を上にして、クリックで選べるようにする
       b.style.zIndex = String(2 + Math.max(0, 100000 - Math.round((x1 - x0) * (y1 - y0))));
@@ -246,14 +246,14 @@ function select(id) {
 function renderPreview(latex) { renderPreviewInto($("preview"), latex); }
 function renderPreviewInto(el, latex) {
   el.textContent = "";
-  if (!latex) { el.textContent = "（LaTeX なし）"; return; }
+  if (!latex) { el.textContent = T("（LaTeX なし）"); return; }
   if (window.katex) {
     const lines = latex.split("\n").filter((x) => x.trim());
     const src = lines.length > 1 ? `\\begin{gathered}${lines.join("\\\\")}\\end{gathered}` : latex;
     try { window.katex.render(src, el, { throwOnError: false, displayMode: true, trust: false, strict: "ignore" }); return; }
     catch (e) { /* 下へ */ }
   }
-  el.textContent = "（プレビューなし: KaTeX を読み込めない）";
+  el.textContent = T("（プレビューなし: KaTeX を読み込めない）");
 }
 
 async function showDetail(f) {
@@ -261,10 +261,10 @@ async function showDetail(f) {
   $("detail").hidden = false; $("empty").hidden = true;
   $("fid").textContent = f.id;
   $("fstatus").textContent = f.status;
-  $("fsource").textContent = `${f.source}${f.confidence != null ? ` / 信頼度 ${f.confidence.toFixed(2)}` : ""}${f.edited ? " / 修正済み" : ""}`;
+  $("fsource").textContent = `${f.source}${f.confidence != null ? T(" / 信頼度 {c}", { c: f.confidence.toFixed(2) }) : ""}${f.edited ? T(" / 修正済み") : ""}`;
   if (document.activeElement !== $("latex")) $("latex").value = f.latex || "";
-  $("ocr").textContent = f.ocr_latex || "（OCR 原文なし）";
-  $("reason").textContent = f.reason ? `理由: ${f.reason}` : "";
+  $("ocr").textContent = f.ocr_latex || T("（OCR 原文なし）");
+  $("reason").textContent = f.reason ? T("理由: {r}", { r: f.reason }) : "";
   renderPreview($("latex").value);
   const alt = $("altbox"); alt.hidden = !f.review;
   if (f.review) {
@@ -278,19 +278,19 @@ async function showDetail(f) {
 }
 
 async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); toast("LaTeX をコピーしました"); }
-  catch (e) { toast("コピーできませんでした（ブラウザの許可を確認）", 4000); }
+  try { await navigator.clipboard.writeText(text); toast(T("LaTeX をコピーしました")); }
+  catch (e) { toast(T("コピーできませんでした（ブラウザの許可を確認）"), 4000); }
 }
 
 async function copyLatex() {
   const text = $("latex").value;
-  if (!text) { toast("コピーする LaTeX がありません"); return; }
-  try { await navigator.clipboard.writeText(text); toast("LaTeX をコピーしました"); }
-  catch (e) { $("latex").select(); document.execCommand("copy"); toast("LaTeX をコピーしました"); }
+  if (!text) { toast(T("コピーする LaTeX がありません")); return; }
+  try { await navigator.clipboard.writeText(text); toast(T("LaTeX をコピーしました")); }
+  catch (e) { $("latex").select(); document.execCommand("copy"); toast(T("LaTeX をコピーしました")); }
 }
 
 async function act(fn, okMsg) {
-  try { await fn(); await refresh(); if (okMsg) toast(okMsg); } catch (e) { toast(`失敗: ${e.message}`, 4000); }
+  try { await fn(); await refresh(); if (okMsg) toast(okMsg); } catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
 }
 
 // Mathpix Snip のように: ドラッグで枠を描く（既存の枠の上からでもよい）。動かさずに離したらクリック扱いで、
@@ -328,15 +328,15 @@ window.addEventListener("mouseup", async (ev) => {
   if (vr[2] - vr[0] < 3 || vr[3] - vr[1] < 3) return;
   if (state.redrawFor) {
     const id = state.redrawFor; state.redrawFor = null;
-    await act(() => api("POST", `/api/formulas/${encodeURIComponent(id)}`, { view_rect: vr }), "枠を更新しました（必要なら再認識）");
+    await act(() => api("POST", `/api/formulas/${encodeURIComponent(id)}`, { view_rect: vr }), T("枠を更新しました（必要なら再認識）"));
     return;
   }
   const recognize = state.doc.backend && state.doc.backend !== "none";
-  if (recognize) toast("認識しています…", 30000);
+  if (recognize) toast(T("認識しています…"), 30000);
   await act(async () => {
     const f = await api("POST", "/api/formulas", { page: d.pno, view_rect: vr, recognize });
     state.selected = f.id;
-  }, recognize ? "枠を追加して認識しました" : "枠を追加しました（LaTeX を入力してください）");
+  }, recognize ? T("枠を追加して認識しました") : T("枠を追加しました（LaTeX を入力してください）"));
 });
 
 // ============================================================ コレクション（Obsidian 風のツリー）
@@ -347,7 +347,8 @@ const ICON = {
   ocr: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 9h8M8 12h8M8 15h5"/></svg>',
   chev: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
 };
-const STATE_TEXT = { done: "準備済み", partial: "一部のみ処理済み", running: "処理中", none: "未処理", unknown: "確認中" };
+const STATE_KEY = { done: "準備済み", partial: "一部のみ処理済み", running: "処理中", none: "未処理", unknown: "確認中" };
+const stateText = (k) => (STATE_KEY[k] ? T(STATE_KEY[k]) : "");
 const tree = { data: null, json: "", expanded: new Set(), firstTime: false, filter: "", rows: [], els: new Map(), focusKey: null, fast: false,
   sel: new Set(), selectMode: false, nodes: new Map(), ocr: null, ocrClosed: null, prevOcr: null, ocrRunning: false };
 
@@ -406,7 +407,7 @@ function renderTree() {
   el.textContent = "";
   if (!tree.rows.length) {
     const d = document.createElement("div"); d.className = "tree-empty";
-    d.textContent = q ? "一致するPDFがありません" : "PDFがありません";
+    d.textContent = q ? T("一致するPDFがありません") : T("PDFがありません");
     el.append(d);
   } else {
     el.append(frag);
@@ -415,8 +416,8 @@ function renderTree() {
   updateFocus(false);
   t.roots.forEach(annotate);
   const ready = t.roots.reduce((a, r) => a + r._done, 0);
-  $("tree-foot").textContent = `${t.files} 個のPDF・準備済み ${ready}` + (t.hashing > 0 ? `・状態を確認中 ${t.hashing}` : "")
-    + (t.truncated ? "・一部のみ表示（上限）" : "");
+  $("tree-foot").textContent = T("{f} 個のPDF・準備済み {r}", { f: t.files, r: ready }) + (t.hashing > 0 ? T("・状態を確認中 {n}", { n: t.hashing }) : "")
+    + (t.truncated ? T("・一部のみ表示（上限）") : "");
   updateSelBar();
 }
 
@@ -439,7 +440,7 @@ function makeRow(node, key, depth, isFolder, open, label, anc = false) {
   row.dataset.key = key; row.tabIndex = -1; row.style.setProperty("--d", String(depth));
   if (tree.selectMode) {
     const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.className = "rowchk"; cb.checked = picked; cb.disabled = anc; cb.tabIndex = -1; cb.setAttribute("aria-label", "選択");
+    cb.type = "checkbox"; cb.className = "rowchk"; cb.checked = picked; cb.disabled = anc; cb.tabIndex = -1; cb.setAttribute("aria-label", T("選択"));
     cb.addEventListener("click", (ev) => { ev.stopPropagation(); tree.focusKey = key; toggleSel(key); });
     row.append(cb);
   }
@@ -450,11 +451,11 @@ function makeRow(node, key, depth, isFolder, open, label, anc = false) {
   // 行の右の操作（マウスを乗せたとき）: フォルダ全体のOCR、⋯ メニュー
   const btns = document.createElement("span"); btns.className = "rowbtns";
   if (isFolder) {
-    const ob = rowBtn(ICON.ocr, "このフォルダ全体をOCR");
+    const ob = rowBtn(ICON.ocr, T("このフォルダ全体をOCR"));
     ob.addEventListener("click", (ev) => { ev.stopPropagation(); actOcr([key]); });
     btns.append(ob);
   }
-  const mb = rowBtn(ICON.more, "メニュー（名前を変更・移動・削除・OCR）");
+  const mb = rowBtn(ICON.more, T("メニュー（名前を変更・移動・削除・OCR）"));
   mb.addEventListener("click", (ev) => { ev.stopPropagation(); tree.focusKey = key; const r = mb.getBoundingClientRect(); showMenu(r.left, r.bottom + 4, menuItemsFor(key), row); });
   btns.append(mb);
   row.append(btns);
@@ -469,17 +470,17 @@ function makeRow(node, key, depth, isFolder, open, label, anc = false) {
   };
   if (isFolder) {
     meta.textContent = node._files ? `${node._done}/${node._files}` : "";
-    row.title = `${label || node.name}\n${node._files} 個のPDF（準備済み ${node._done}）`;
+    row.title = `${label || node.name}\n${T("{f} 個のPDF（準備済み {d}）", { f: node._files, d: node._done })}`;
     row.append(meta);
     chev.addEventListener("click", (ev) => { ev.stopPropagation(); tree.focusKey = key; toggleFolder(node.key); });
     row.addEventListener("click", onClick);
     return row;
   }
   const dot = document.createElement("span"); dot.className = `dot ${node.state}`;
-  if (node.formulas != null) meta.textContent = `式 ${node.formulas}${node.review ? `・要確認 ${node.review}` : ""}`;
+  if (node.formulas != null) meta.textContent = T("式 {n}", { n: node.formulas }) + (node.review ? T("・要確認 {n}", { n: node.review }) : "");
   if (node.review) meta.classList.add("has-review");
   row.append(meta, dot);
-  row.title = `${node.name}\n${STATE_TEXT[node.state] || ""}${node.pages ? `・${node.pages} ページ` : ""}${node.review ? `・要確認 ${node.review} 件` : ""}`;
+  row.title = `${node.name}\n${stateText(node.state)}${node.pages ? T("・{n} ページ", { n: node.pages }) : ""}${node.review ? T("・要確認 {n} 件", { n: node.review }) : ""}`;
   row.addEventListener("click", onClick);
   return row;
 }
@@ -534,7 +535,7 @@ $("tree-filter").addEventListener("keydown", (ev) => {
   if (ev.key === "Enter") { const f = tree.rows.find((r) => !r.isFolder); if (f) openDoc(f.node.id); }
 });
 $("tree-collapse").addEventListener("click", () => { tree.expanded = new Set(); saveExpanded(); renderTree(); });
-$("tree-refresh").addEventListener("click", async () => { try { await loadTree(true); toast("一覧を更新しました", 1200); } catch (e) { toast(`失敗: ${e.message}`, 3000); } });
+$("tree-refresh").addEventListener("click", async () => { try { await loadTree(true); toast(T("一覧を更新しました"), 1200); } catch (e) { toast(T("失敗: {m}", { m: e.message }), 3000); } });
 
 async function loadTree(force = false) {
   const t = await api("GET", force ? "/api/tree?refresh=1" : "/api/tree");
@@ -543,7 +544,7 @@ async function loadTree(force = false) {
   const j = JSON.stringify(rest);
   if (j !== tree.json) { tree.json = j; tree.data = t; indexTree(); renderTree(); } else { tree.data.ocr = ocr; }
   if (tree.prevOcr === "running" && ocr && ocr.state !== "running") {
-    toast(ocr.state === "done" ? `OCRが終わりました（成功 ${ocr.ok}・失敗 ${ocr.failed}・スキップ ${ocr.skipped}）` : "OCRを止めました", 5000);
+    toast(ocr.state === "done" ? T("OCRが終わりました（成功 {ok}・失敗 {f}・スキップ {s}）", { ok: ocr.ok, f: ocr.failed, s: ocr.skipped }) : T("OCRを止めました"), 5000);
     if (state.doc) refresh();
   }
   tree.prevOcr = ocr ? ocr.state : null; tree.ocr = ocr; tree.ocrRunning = !!(ocr && ocr.state === "running");
@@ -555,11 +556,11 @@ async function loadTree(force = false) {
 // ---- 認識エンジン（PP-FormulaNet / UniMERNet / Mathpix）の選択
 function syncEngine(t) {
   const sel = $("engine"); if (!sel || !t.engines) return;
-  const key = t.engines.map((e) => e.name).join(",");
+  const key = t.engines.map((e) => e.name).join(",") + "|" + window.ploI18n.lang;
   if (sel.dataset.key !== key) {
     sel.textContent = "";
-    const none = document.createElement("option"); none.value = "none"; none.textContent = "エンジン未選択"; sel.append(none);
-    for (const e of t.engines) { const o = document.createElement("option"); o.value = e.name; o.textContent = e.label; sel.append(o); }
+    const none = document.createElement("option"); none.value = "none"; none.textContent = T("エンジン未選択"); sel.append(none);
+    for (const e of t.engines) { const o = document.createElement("option"); o.value = e.name; o.textContent = T(e.label); sel.append(o); }
     sel.dataset.key = key;
   }
   sel.value = t.backend || "none";
@@ -571,15 +572,15 @@ $("engine").addEventListener("change", async (ev) => {
   if (name === "none") { sel.value = prev; return; }
   const ext = (tree.data.engines.find((e) => e.name === name) || {}).external;
   if (ext) {
-    const r = await ask({ title: "Mathpix に式の画像を送りますか？", ok: "送ることに同意して使う",
-      message: "認識する式の画像が、外部サービス（Mathpix）に送信されます。教材や資料が第三者に渡ってよい場合だけ同意してください。同意しない場合は、手元で動く PP-FormulaNet / UniMERNet を選べます。" });
+    const r = await ask({ title: T("Mathpix に式の画像を送りますか？"), ok: T("送ることに同意して使う"),
+      message: T("認識する式の画像が、外部サービス（Mathpix）に送信されます。教材や資料が第三者に渡ってよい場合だけ同意してください。同意しない場合は、手元で動く PP-FormulaNet / UniMERNet を選べます。") });
     if (!r) { sel.value = prev; return; }
   }
   try {
     await api("POST", "/api/engine", { name, confirm_external: !!ext });
     await loadTree(true);
-    toast(`認識エンジンを切り替えました`, 2000);
-  } catch (e) { sel.value = prev; toast(`切り替えられません: ${e.message}`, 5000); }
+    toast(T("認識エンジンを切り替えました"), 2000);
+  } catch (e) { sel.value = prev; toast(T("切り替えられません: {m}", { m: e.message }), 5000); }
 });
 
 function revealCurrent() {
@@ -747,18 +748,18 @@ function menuItemsFor(key) {
   const n = tree.nodes.get(key);
   if (!n || !tree.data) return [];
   const ro = !!tree.data.readonly, noModel = noModels();
-  const fsItem = (label, run, extra = {}) => ({ label, run, disabled: ro, title: ro ? "読み取り専用で起動しているため、ファイルは動かせません" : "", ...extra });
-  const ocr = { label: n.type === "folder" ? "OCRを行う（フォルダ全体）" : "OCRを行う", run: () => actOcr([key]), disabled: noModel,
-    title: noModel ? "認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）" : "" };
+  const fsItem = (label, run, extra = {}) => ({ label, run, disabled: ro, title: ro ? T("読み取り専用で起動しているため、ファイルは動かせません") : "", ...extra });
+  const ocr = { label: n.type === "folder" ? T("OCRを行う（フォルダ全体）") : T("OCRを行う"), run: () => actOcr([key]), disabled: noModel,
+    title: noModel ? T("認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）") : "" };
   if (n.type === "file") {
-    return [ocr, fsItem("名前を変更", () => actRename(key)), fsItem("別の場所へ移動", () => actMove([key])), "-",
-      fsItem("ゴミ箱へ移動", () => actTrash([key]), { danger: true })];
+    return [ocr, fsItem(T("名前を変更"), () => actRename(key)), fsItem(T("別の場所へ移動"), () => actMove([key])), "-",
+      fsItem(T("ゴミ箱へ移動"), () => actTrash([key]), { danger: true })];
   }
   const items = [ocr];
-  if (key !== "files") items.push(fsItem("新しいフォルダ", () => actNewFolder(key)));
+  if (key !== "files") items.push(fsItem(T("新しいフォルダ"), () => actNewFolder(key)));
   if (!isRootKey(key)) {
-    items.push(fsItem("名前を変更", () => actRename(key)), fsItem("別の場所へ移動", () => actMove([key])), "-",
-      fsItem("ゴミ箱へ移動", () => actTrash([key]), { danger: true }));
+    items.push(fsItem(T("名前を変更"), () => actRename(key)), fsItem(T("別の場所へ移動"), () => actMove([key])), "-",
+      fsItem(T("ゴミ箱へ移動"), () => actTrash([key]), { danger: true }));
   }
   return items;
 }
@@ -773,61 +774,61 @@ async function syncAfterFs() {
 }
 async function doFs(path, body) {
   try { const r = await api("POST", path, body); await syncAfterFs(); return r; }
-  catch (e) { toast(`失敗: ${e.message}`, 6000); return null; }
+  catch (e) { toast(T("失敗: {m}", { m: e.message }), 6000); return null; }
 }
 
 async function actRename(key) {
   const n = tree.nodes.get(key);
   if (!n) return;
   const isFile = n.type === "file", cur = isFile ? n.name.replace(/\.pdf$/i, "") : n.name;
-  const r = await ask({ title: isFile ? "PDFの名前を変更" : "フォルダの名前を変更", message: isFile ? "拡張子（.pdf）は自動で付きます。" : "", value: cur, ok: "変更" });
+  const r = await ask({ title: isFile ? T("PDFの名前を変更") : T("フォルダの名前を変更"), message: isFile ? T("拡張子（.pdf）は自動で付きます。") : "", value: cur, ok: T("変更") });
   if (!r) return;
   const v = r.value.trim();
   if (!v || v === cur) return;
-  if (await doFs("/api/fs/rename", { target: key, name: v })) toast("名前を変更しました");
+  if (await doFs("/api/fs/rename", { target: key, name: v })) toast(T("名前を変更しました"));
 }
 async function actMove(keys) {
   if (!keys.length) return;
   const folders = pickerFolders(keys.filter((k) => (tree.nodes.get(k) || {}).type === "folder"));
-  if (!folders.length) { toast("移動先のフォルダがありません"); return; }
-  const r = await ask({ title: "別の場所へ移動", message: "移動先のフォルダを選んでください。", folders, ok: "移動" });
+  if (!folders.length) { toast(T("移動先のフォルダがありません")); return; }
+  const r = await ask({ title: T("別の場所へ移動"), message: T("移動先のフォルダを選んでください。"), folders, ok: T("移動") });
   if (!r || !r.key) return;
   const res = await doFs("/api/fs/move", { targets: keys, dest: r.key });
-  if (res) { tree.sel.clear(); renderTree(); toast(`${res.count} 件を「${(tree.nodes.get(r.key) || {}).name || ""}」へ移動しました`); }
+  if (res) { tree.sel.clear(); renderTree(); toast(T("{n} 件を「{d}」へ移動しました", { n: res.count, d: (tree.nodes.get(r.key) || {}).name || "" })); }
 }
 async function actTrash(keys) {
   const nodes = keys.map((k) => tree.nodes.get(k)).filter(Boolean);
   if (!nodes.length) return;
   const files = countFiles(keys), one = nodes.length === 1 ? nodes[0] : null;
-  const msg = one ? (one.type === "folder" ? `フォルダ「${one.name}」を、中のPDF ${files} 個ごとゴミ箱へ移動します。` : `「${one.name}」をゴミ箱へ移動します。`)
-    : `選んだ ${nodes.length} 件（PDF ${files} 個）をゴミ箱へ移動します。`;
-  const r = await ask({ title: "ゴミ箱へ移動", message: `${msg}\nゴミ箱から元に戻せます。認識した結果は残ります。`, ok: "ゴミ箱へ移動", danger: true });
+  const msg = one ? (one.type === "folder" ? T("フォルダ「{name}」を、中のPDF {f} 個ごとゴミ箱へ移動します。", { name: one.name, f: files }) : T("「{name}」をゴミ箱へ移動します。", { name: one.name }))
+    : T("選んだ {n} 件（PDF {f} 個）をゴミ箱へ移動します。", { n: nodes.length, f: files });
+  const r = await ask({ title: T("ゴミ箱へ移動"), message: T("{msg}\nゴミ箱から元に戻せます。認識した結果は残ります。", { msg }), ok: T("ゴミ箱へ移動"), danger: true });
   if (!r) return;
   const res = await doFs("/api/fs/trash", { targets: keys });
-  if (res) { tree.sel.clear(); renderTree(); toast(`${res.trashed.length} 件をゴミ箱へ移動しました`); }
+  if (res) { tree.sel.clear(); renderTree(); toast(T("{n} 件をゴミ箱へ移動しました", { n: res.trashed.length })); }
 }
 async function actNewFolder(parentKey) {
-  if (!tree.data || !parentKey) { toast("フォルダを作る場所がありません"); return; }
+  if (!tree.data || !parentKey) { toast(T("フォルダを作る場所がありません")); return; }
   const parent = tree.nodes.get(parentKey);
-  const r = await ask({ title: "新しいフォルダ", message: `「${parent ? parent.name : ""}」の中に作ります。`, value: "", placeholder: "フォルダの名前", ok: "作成" });
+  const r = await ask({ title: T("新しいフォルダ"), message: T("「{p}」の中に作ります。", { p: parent ? parent.name : "" }), value: "", placeholder: T("フォルダの名前"), ok: T("作成") });
   if (!r || !r.value.trim()) return;
   const res = await doFs("/api/fs/mkdir", { parent: parentKey, name: r.value });
   if (res) {
     tree.expanded.add(parentKey); saveExpanded();
     tree.focusKey = res.key; renderTree(); updateFocus(true);
-    toast(`フォルダ「${res.name}」を作りました`);
+    toast(T("フォルダ「{name}」を作りました", { name: res.name }));
   }
 }
 async function actOcr(keys) {
-  if (noModels()) { toast("認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）", 4000); return; }
+  if (noModels()) { toast(T("認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）"), 4000); return; }
   const n = countFiles(keys);
-  if (!n) { toast("対象のPDFがありません"); return; }
+  if (!n) { toast(T("対象のPDFがありません")); return; }
   if (n > 1) {
-    const r = await ask({ title: "OCRを行う", message: `${n} 個のPDFの数式を検出・認識します。\nCPUでは1ページあたり約40秒かかります。途中でキャンセルでき、あとで続きから再開できます。`, ok: "始める" });
+    const r = await ask({ title: T("OCRを行う"), message: T("{n} 個のPDFの数式を検出・認識します。\nCPUでは1ページあたり約40秒かかります。途中でキャンセルでき、あとで続きから再開できます。", { n }), ok: T("始める") });
     if (!r) return;
   }
-  try { tree.ocrClosed = null; renderOcrBar(await api("POST", "/api/ocr", { targets: keys })); tree.ocrRunning = true; toast("OCRを始めました"); }
-  catch (e) { toast(`失敗: ${e.message}`, 6000); }
+  try { tree.ocrClosed = null; renderOcrBar(await api("POST", "/api/ocr", { targets: keys })); tree.ocrRunning = true; toast(T("OCRを始めました")); }
+  catch (e) { toast(T("失敗: {m}", { m: e.message }), 6000); }
 }
 
 // ---- 複数選択
@@ -847,7 +848,7 @@ function toggleSel(key) {
 function updateSelBar() {
   const n = tree.sel.size;
   $("selbar").hidden = n === 0;
-  if (n) $("selcount").textContent = `${n} 件を選択中（PDF ${countFiles([...tree.sel])} 個）`;
+  if (n) $("selcount").textContent = T("{n} 件を選択中（PDF {f} 個）", { n, f: countFiles([...tree.sel]) });
 }
 
 // ---- OCR の進み具合
@@ -857,9 +858,9 @@ function renderOcrBar(o) {
   bar.hidden = false;
   const running = o.state === "running", bad = o.items.filter((i) => i.state === "error" || i.state === "skipped");
   $("ocrtext").textContent = running ? `OCR ${o.finished}/${o.total}${o.current ? `・${o.current}` : ""}`
-    : o.state === "cancelled" ? `OCRを中止しました（${o.finished}/${o.total}）`
-    : o.state === "error" ? `OCRが止まりました: ${(o.items.find((i) => i.state === "error") || {}).reason || ""}`
-    : `OCR完了（成功 ${o.ok}・失敗 ${o.failed}・スキップ ${o.skipped}）`;
+    : o.state === "cancelled" ? T("OCRを中止しました（{a}/{b}）", { a: o.finished, b: o.total })
+    : o.state === "error" ? T("OCRが止まりました: {r}", { r: (o.items.find((i) => i.state === "error") || {}).reason || "" })
+    : T("OCR完了（成功 {ok}・失敗 {f}・スキップ {s}）", { ok: o.ok, f: o.failed, s: o.skipped });
   $("ocrtext").title = bad.map((i) => `${i.name}: ${i.reason || i.state}`).join("\n");
   $("ocrprog").style.width = `${Math.round(((o.finished + (running ? 0.5 : 0)) / Math.max(1, o.total)) * 100)}%`;
   $("ocr-cancel").hidden = !running; $("ocr-close").hidden = running;
@@ -871,7 +872,7 @@ let lastVersion = -1;
 async function openDoc(id, quiet = false) {
   if (id === state.docId) { if (innerWidth <= 900) setSidebar(false); return; }
   try { await api("POST", "/api/open", { id }); }
-  catch (e) { if (!quiet) toast(`開けませんでした: ${e.message}`, 5000); return; }
+  catch (e) { if (!quiet) toast(T("開けませんでした: {m}", { m: e.message }), 5000); return; }
   LS.set("plo-last", id);
   await loadDoc();
   try { await loadTree(); } catch (e) { /* 次の更新で反映 */ }
@@ -911,26 +912,26 @@ async function loadDoc(knownEmpty = false) {
 function wire() {
   $("latex").addEventListener("input", () => renderPreview($("latex").value));
   $("copy").onclick = copyLatex;
-  $("save").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}`, { latex: $("latex").value }), "修正を保存しました");
-  $("confirm").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}`, { latex: $("latex").value, status: "confirmed" }), "確定しました");
-  $("exclude").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}`, { status: "excluded", reason: "user" }), "除外しました");
-  $("recognize").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}/recognize`), "再認識しました");
-  $("redraw").onclick = () => { state.redrawFor = state.selected; toast("ページ上で新しい枠をドラッグしてください"); };
+  $("save").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}`, { latex: $("latex").value }), T("修正を保存しました"));
+  $("confirm").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}`, { latex: $("latex").value, status: "confirmed" }), T("確定しました"));
+  $("exclude").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}`, { status: "excluded", reason: "user" }), T("除外しました"));
+  $("recognize").onclick = () => act(() => api("POST", `/api/formulas/${encodeURIComponent(state.selected)}/recognize`), T("再認識しました"));
+  $("redraw").onclick = () => { state.redrawFor = state.selected; toast(T("ページ上で新しい枠をドラッグしてください")); };
   $("delete").onclick = () => {
-    if (!confirm(`${state.selected} を削除しますか？（履歴には残ります）`)) return;
+    if (!confirm(T("{id} を削除しますか？（履歴には残ります）", { id: state.selected }))) return;
     const id = state.selected; state.selected = null;
-    act(() => api("DELETE", `/api/formulas/${encodeURIComponent(id)}`), "削除しました");
+    act(() => api("DELETE", `/api/formulas/${encodeURIComponent(id)}`), T("削除しました"));
   };
   // 「このページを認識」: いま表示しているページだけを検出・認識する（PDF全体は、⋯ の「OCRを行う」）
   $("autorun").onclick = () => {
     if (!state.doc) return;
     const n = state.cur;
-    act(() => api("POST", "/api/auto", { pages: [n], force: true }), `${n + 1} ページ目の認識を始めました`);
+    act(() => api("POST", "/api/auto", { pages: [n], force: true }), T("{n} ページ目の認識を始めました", { n: n + 1 }));
   };
   $("reviewbtn").onclick = () => nextReview(1);
   $("usealt").onclick = () => {
     const f = state.formulas.find((x) => x.id === state.selected);
-    if (f && f.alt_latex) act(() => api("POST", `/api/formulas/${encodeURIComponent(f.id)}`, { latex: f.alt_latex }), "もう一方の読み取りを採用しました");
+    if (f && f.alt_latex) act(() => api("POST", `/api/formulas/${encodeURIComponent(f.id)}`, { latex: f.alt_latex }), T("もう一方の読み取りを採用しました"));
   };
   $("doc-menu").onclick = () => menuAt($("doc-menu"), state.docId ? menuItemsFor(state.docId) : []);
   $("tree-newfolder").onclick = () => actNewFolder(defaultFolderKey());
@@ -939,17 +940,17 @@ function wire() {
   $("sel-move").onclick = () => actMove([...tree.sel]);
   $("sel-trash").onclick = () => actTrash([...tree.sel]);
   $("sel-clear").onclick = () => { tree.sel.clear(); renderTree(); };
-  $("ocr-cancel").onclick = async () => { try { renderOcrBar(await api("POST", "/api/ocr/cancel")); } catch (e) { toast(`失敗: ${e.message}`, 4000); } };
+  $("ocr-cancel").onclick = async () => { try { renderOcrBar(await api("POST", "/api/ocr/cancel")); } catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); } };
   $("ocr-close").onclick = () => { if (tree.ocr) tree.ocrClosed = tree.ocr.started; renderOcrBar(tree.ocr); };
   $("export").onclick = async () => {
-    if (!state.doc) { toast("PDFを選んでください"); return; }
-    $("export").disabled = true; toast("派生PDFを作成・検証しています…", 60000);
+    if (!state.doc) { toast(T("PDFを選んでください。")); return; }
+    $("export").disabled = true; toast(T("派生PDFを作成・検証しています…"), 60000);
     try {
       const r = await api("POST", "/api/export", { mode: $("mode").value, only_confirmed: $("onlyconfirmed").checked });
       const ex = r.excluded.filter((x) => x.reason && x.reason !== "user").map((x) => `${x.id}: ${x.reason}`);
-      if (r.ok) toast(`保存しました（埋め込み ${r.counts.embedded} 件、除外 ${r.counts.excluded} 件）\n${r.output}${ex.length ? "\n" + ex.join("\n") : ""}`, 10000);
-      else toast(`保存しませんでした（終了コード ${r.exit_code}）\n${r.errors.join("\n")}${r.failed_checks.length ? "\n検証不合格: " + r.failed_checks.join(", ") : ""}`, 10000);
-    } catch (e) { toast(`失敗: ${e.message}`, 6000); }
+      if (r.ok) toast(T("保存しました（埋め込み {e} 件、除外 {x} 件）\n{out}{extra}", { e: r.counts.embedded, x: r.counts.excluded, out: r.output, extra: ex.length ? "\n" + ex.join("\n") : "" }), 10000);
+      else toast(T("保存しませんでした（終了コード {c}）\n{errs}{checks}", { c: r.exit_code, errs: r.errors.join("\n"), checks: r.failed_checks.length ? T("\n検証不合格: {c}", { c: r.failed_checks.join(", ") }) : "" }), 10000);
+    } catch (e) { toast(T("失敗: {m}", { m: e.message }), 6000); }
     finally { $("export").disabled = false; }
   };
 
@@ -970,7 +971,7 @@ function wire() {
       case "ArrowUp": if (fitPage) goto(state.cur - 1); else handled = false; break;
       case "Home": goto(0); break;
       case "End": goto(slots.length - 1); break;
-      case "f": setFit(state.fit === "page" ? "width" : "page"); toast(state.fit === "page" ? "表示: ページ全体" : "表示: 幅に合わせる", 1100); break;
+      case "f": setFit(state.fit === "page" ? "width" : "page"); toast(state.fit === "page" ? T("表示: ページ全体") : T("表示: 幅に合わせる"), 1100); break;
       case "b": setSidebar(!$("layout").classList.contains("sb-open"), true); break;
       case "/": $("tree-filter").focus(); $("tree-filter").select(); break;
       case "c": if (state.selected) copyLatex(); else handled = false; break;
@@ -990,15 +991,15 @@ async function updateAutoStatus() {
       const el = $("autostat");
       tree.fast = a.state === "running" || a.state === "preparing";
       if (a.state === "running") {
-        el.textContent = a.phase === "detect" ? `数式を検出中… ${a.page}/${a.pages} ページ` : `認識中… ${a.recognized}/${a.total || 0}`;
+        el.textContent = a.phase === "detect" ? T("数式を検出中… {p}/{n} ページ", { p: a.page, n: a.pages }) : T("認識中… {r}/{t}", { r: a.recognized, t: a.total || 0 });
       } else if (a.state === "preparing") {
-        el.textContent = "事前処理中（終わるまで表示のみ。結果は順に反映）";
+        el.textContent = T("事前処理中（終わるまで表示のみ。結果は順に反映）");
       } else if (a.state === "done") {
-        el.textContent = "認識済み";
+        el.textContent = T("認識済み");
       } else if (a.state === "error") {
-        el.textContent = `自動認識に失敗: ${a.error}`;
+        el.textContent = T("自動認識に失敗: {m}", { m: a.error });
       } else {
-        el.textContent = state.formulas.length === 0 && state.doc.backend !== "none" ? "未処理" : "";
+        el.textContent = state.formulas.length === 0 && state.doc.backend !== "none" ? T("未処理") : "";
       }
       $("autorun").classList.toggle("attention", a.state === "idle" && state.formulas.length === 0 && state.doc.backend !== "none");
       if (a.version !== lastVersion) { lastVersion = a.version; await refresh(); }
@@ -1010,7 +1011,7 @@ async function updateAutoStatus() {
 async function pollAuto() { setTimeout(pollAuto, await updateAutoStatus()); }
 
 async function boot() {
-  if (!token) { document.body.textContent = "トークンがありません。起動時に表示された URL を開いてください。"; return; }
+  if (!token) { document.body.textContent = T("トークンがありません。起動時に表示された URL を開いてください。"); return; }
   wire();
   let t;
   // 画面に戻ってきたら、すぐ最新の状態にする（見ていない間は、負荷を減らすため更新を止めている）
@@ -1019,7 +1020,7 @@ async function boot() {
     loadTree().catch(() => {});
     if (state.doc) refresh().catch(() => {});
   });
-  try { t = await loadTree(); } catch (e) { toast(`読み込みに失敗: ${e.message}`, 6000); return; }
+  try { t = await loadTree(); } catch (e) { toast(T("読み込みに失敗: {m}", { m: e.message }), 6000); return; }
   await loadDoc(!t.current);  // 起動時に開かれている PDF があれば表示する
   revealCurrent();
   if (state.doc) focusDeck();
@@ -1031,3 +1032,12 @@ async function boot() {
   pollAuto(); pollTree();
 }
 boot();
+
+
+// 言語を切り替えたとき: 動的に作った表示を作り直す
+document.addEventListener("plo-lang", () => {
+  try {
+    if (tree.data) { syncEngine(tree.data); renderTree(); renderOcrBar(tree.ocr); }
+    if (state.doc) { $("stats").textContent = ""; refresh(); updateAutoStatus(); document.querySelectorAll("#pages img").forEach((im, i) => { im.alt = T("ページ {n}", { n: i + 1 }); }); }
+  } catch (e) { /* 次の更新で反映 */ }
+});

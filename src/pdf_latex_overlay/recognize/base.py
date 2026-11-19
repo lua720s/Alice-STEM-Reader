@@ -73,6 +73,11 @@ def get_backend(name: str, **kw) -> Backend:
         from .unimernet import UniMERNetBackend
 
         return UniMERNetBackend(**kw)
+    if name == "unimernet_tiny":  # 軽い版（既定の base より約3倍速く、精度は下がる）
+        from .unimernet import ROOT, UniMERNetBackend
+
+        kw.setdefault("model_dir", ROOT / "models" / "unimernet_tiny")
+        return UniMERNetBackend(**kw)
     if name == "ppformulanet":
         from .ppformulanet import PPFormulaNetBackend
 
@@ -85,7 +90,8 @@ def get_backend(name: str, **kw) -> Backend:
 
 
 ENGINES = {
-    "unimernet": {"label": "UniMERNet（手元で動く）", "external": False},
+    "unimernet": {"label": "UniMERNet base（手元で動く・既定）", "external": False},
+    "unimernet_tiny": {"label": "UniMERNet tiny（手元で動く・軽い）", "external": False},
     "ppformulanet": {"label": "PP-FormulaNet（手元で動く）", "external": False},
     "mathpix": {"label": "Mathpix（画像を外部に送る）", "external": True},
 }

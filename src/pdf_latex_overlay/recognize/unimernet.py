@@ -2,7 +2,7 @@
 
 既定の場所（プロジェクト直下、いずれも Git 管理外）
 - Python: .venv-ml/bin/python（環境変数 PLO_ML_PYTHON で変更）
-- モデル: models/unimernet_tiny（環境変数 PLO_UNIMERNET_DIR で変更）
+- モデル: 既定 models/unimernet_base（2026-11-19に tiny から変更。環境変数 PLO_UNIMERNET_DIR で変更、軽い models/unimernet_tiny はエンジン名 unimernet_tiny で選ぶ）
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class UniMERNetBackend:
     name = "unimernet"
 
     def __init__(self, model_dir=None, python=None, device="cpu", timeout_s: float = 120.0, threads: int = 0):
-        self.model_dir = Path(model_dir or os.environ.get("PLO_UNIMERNET_DIR") or ROOT / "models" / "unimernet_tiny")
+        self.model_dir = Path(model_dir or os.environ.get("PLO_UNIMERNET_DIR") or ROOT / "models" / "unimernet_base")
         self.python = Path(python or os.environ.get("PLO_ML_PYTHON") or ROOT / ".venv-ml" / "bin" / "python")
         self.device = device
         self.timeout_s = timeout_s
@@ -164,11 +164,11 @@ class UniMERNetBackend:
 
 
 def make_verifier(model_dir=None, **kw) -> "UniMERNetBackend":
-    """検証用（2つ目）のモデル。既定は models/unimernet_base（環境変数 PLO_VERIFY_DIR で変更）。
+    """検証用（2つ目）のモデル。主が base なので、既定は軽い models/unimernet_tiny（環境変数 PLO_VERIFY_DIR で変更）。
 
     重みやML用Pythonがなければ、RecognizerUnavailable を出す（起動時に分かる）。
     """
-    b = UniMERNetBackend(model_dir=model_dir or os.environ.get("PLO_VERIFY_DIR") or ROOT / "models" / "unimernet_base", **kw)
+    b = UniMERNetBackend(model_dir=model_dir or os.environ.get("PLO_VERIFY_DIR") or ROOT / "models" / "unimernet_tiny", **kw)
     b._check()
     return b
 

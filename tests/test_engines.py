@@ -37,7 +37,7 @@ def _req(url, token=None, method="GET", body=None):
 
 
 def test_engine_names_and_external_flag():
-    assert set(ENGINES) == {"unimernet", "ppformulanet", "mathpix"}
+    assert set(ENGINES) == {"unimernet", "unimernet_tiny", "ppformulanet", "mathpix"}
     assert ENGINES["mathpix"]["external"] and not ENGINES["ppformulanet"]["external"]
     assert get_backend("ppformulanet").name == "ppformulanet"
     assert get_backend("mathpix").name == "mathpix"

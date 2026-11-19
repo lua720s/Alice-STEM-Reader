@@ -282,13 +282,13 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--formulas", default=None, help="式 JSON（なければ作業領域に新規作成）")
     v.add_argument("--workdir", default=None)
     v.add_argument("--port", type=int, default=0)
-    v.add_argument("--backend", default="none", help="認識エンジン（none / unimernet / ppformulanet / mathpix）。画面の「エンジン」でも切り替えられる")
+    v.add_argument("--backend", default="none", help="認識エンジン（none / unimernet[=base] / unimernet_tiny / ppformulanet / mathpix）。画面の「エンジン」でも切り替えられる")
     v.add_argument("--allow-external", action="store_true", help="Mathpix など外部サービスへ画像を送ることに同意する（--backend mathpix に必要）")
     v.add_argument("--no-open", action="store_true")
     v.add_argument("--no-auto", action="store_true", help="開いた時点での全ページ自動認識をしない")
     v.add_argument("--readonly", action="store_true", help="名前の変更・移動・削除・フォルダ作成を受け付けない")
     v.add_argument("--verify", action="store_true",
-                   help="2つ目のモデル（既定 models/unimernet_base）でも読み、食い違った式に「要確認」の印を付ける（約3倍遅い）")
+                   help="2つ目のモデル（既定 models/unimernet_tiny）でも読み、食い違った式に「要確認」の印を付ける（約3倍遅い）")
     v.set_defaults(func=cmd_viewer)
 
     r = sub.add_parser("recognize", help="式の矩形を切り出して LaTeX を認識する")

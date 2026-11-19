@@ -278,3 +278,11 @@ AI_LOG.md、MODELS.md、README.md、DESIGN.md、AGENTS.md
 - tiny の誤りには、`\frac{…}{\sqrt{…}}` を勝手に足す、`1)` を取り込む、がある。base は `\underline` や `\quad` の付加が目立つ。PP は添字や積分記号の読み違い（`\iint`、`\int_{\frac{1}{2}}^{\frac{1}{2}}`）。
 - 限界: 33式、正解は私が作成、同じ2ページ。Mathpix は含めていない（外部送信の許可が最小限の3式だったため）。
 - 正解と結果は `runs/realtext/truth33.py`・`cmp33.json`（教材由来なのでGit管理外）。`cmp33.py` で再実行できる。
+
+## 既定をUniMERNet baseに変更（2026-11-19）
+
+33式の試験（base 24/33、tiny 17/33、PP-FormulaNet 8/33）を受け、**既定のエンジンを UniMERNet base にした**。tiny は `--backend unimernet_tiny`（画面では「UniMERNet tiny」）で選べる。`--verify` の2つ目のモデルは、主が base になったので、既定を軽い tiny にした（`PLO_VERIFY_DIR` で変更）。代償: baseは遅く（tinyの約3倍）、メモリは約1.25GB。先にOCR（`prepare`）しておけば、開くときの待ちは増えない。
+
+## 画面の多言語化（2026-11-19）
+
+日本語・英語・中国語・スペイン語・ロシア語。`viewer/static/i18n.js`（日本語の文言をキーにした辞書）。翻訳は私が作成したもので、**母語話者の確認は受けていない**。サーバーが返すエラー文は日本語のまま。Mathpixの「APIかアプリか」の選択は、仕様の確認待ちで未実装。

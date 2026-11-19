@@ -24,7 +24,7 @@ from .hub import Hub
 from .session import SessionError, ViewerSession, valid_id
 
 STATIC = Path(__file__).resolve().parent / "static"
-STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js"}
+STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js", "i18n.js"}
 
 
 def make_handler(hub: Hub, token: str, port_ref: dict):
