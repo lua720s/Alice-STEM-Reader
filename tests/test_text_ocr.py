@@ -77,11 +77,47 @@ def test_process_text_adds_text_boxes_and_respects_edits(fx, tmp_path):
     assert any(f.id == "f1" for f in fs.formulas)  # 数式は消えない
 
 
-def test_text_boxes_are_never_embedded(fx, tmp_path):
-    doc = pymupdf.open(_pdf(fx, tmp_path))
-    f = Formula(id="t1", page=0, rect=(100, 100, 300, 130), latex="Ascii text only", kind="text", status="confirmed")
-    out = pipeline.classify(doc, [f], pipeline.Options(mode="invisible"))
-    assert out[0].status == "excluded" and out[0].reason == "text_not_embedded"  # ASCII だけの文章でも、埋め込まない
+def _texts(fx):
+    page = pymupdf.open(fx["scan"])[0].rect
+    w = page.width - 40
+    texts = ["次の定積分を求めよ", "(1) 1回の部分積分では求まらないので，再度，部分積分をする.", "例题156 定積分の部分積分法(2)", "解答", "解答"]
+    return [Formula(id=f"t{i}", page=0, rect=(20, 60 + i * 45, 20 + w * (0.5 if i == 0 else 1), 88 + i * 45), latex=t,
+                    kind="text", status="confirmed") for i, t in enumerate(texts)]
+
+
+def test_japanese_text_is_embedded_invisibly_and_fully_verified(fx, tmp_path):
+    """日本語の文章を不可視テキストとして埋め込み、外観・本文・MuPDF・PDFKit の検証がすべて通る（同じ文が2回出ても可）。"""
+    from pdf_latex_overlay import copycheck
+
+    fs = FormulaSet(formulas=_texts(fx) + [Formula(id="f1", page=0, rect=(20, 330, 150, 356), latex="x^{2}+1", status="confirmed")])
+    out = tmp_path / "ja.pdf"
+    rep = pipeline.process_pdf(fx["scan"], out, fs, pipeline.Options(pdfkit="require" if copycheck.pdfkit_available() else "off"))
+    assert rep.exit_code == 0 if hasattr(rep, "exit_code") else True
+    assert all(v.get("ok") is not False for v in rep.checks.values()), rep.checks
+    assert rep.checks["appearance"]["ok"] and rep.checks["mupdf_copy"]["ok"]
+    assert [f["status"] for f in rep.formulas] == ["embedded"] * 6
+    doc = pymupdf.open(out)
+    got = doc[0].get_text("text", clip=pymupdf.Rect(20, 60, 400, 90)).strip()
+    assert got == "次の定積分を求めよ"  # 実際に選択・検索できる
+    assert doc[0].search_for("例题156")  # 簡体字の「题」も入る
+    fonts = [f for f in doc.get_page_fonts(0) if "PLOSUBS" in f[3] or "Droid" in f[3]]
+    assert fonts, doc.get_page_fonts(0)  # サブセットフォントが入っている
+    assert out.stat().st_size - fx["scan"].stat().st_size < 150_000  # サブセットなので、小さい
+    doc.close()
+
+
+def test_text_unsupported_char_and_priority(fx):
+    doc = pymupdf.open(fx["scan"])
+    bad = Formula(id="b", page=0, rect=(20, 60, 200, 88), latex="これは😀です", kind="text", status="confirmed")
+    ok = Formula(id="o", page=0, rect=(20, 120, 200, 148), latex="文章", kind="text", status="confirmed")
+    out = {f.id: f for f in pipeline.classify(doc, [bad, ok], pipeline.Options())}
+    assert out["b"].status == "excluded" and out["b"].reason == "unsupported_char"
+    assert out["o"].status == "embedded"
+    # 数式と重なる文章は、数式を優先する（数式を残し、文章を除く）
+    fm = Formula(id="m", page=0, rect=(30, 125, 90, 145), latex="x^{2}", status="pending")
+    txt = Formula(id="t", page=0, rect=(20, 120, 200, 148), latex="文章", kind="text", status="confirmed")
+    res = {f.id: f for f in pipeline.classify(doc, [txt, fm], pipeline.Options())}
+    assert res["m"].status == "embedded" and res["t"].status == "excluded" and res["t"].reason.startswith("overlaps:")
     doc.close()
 
 
@@ -109,4 +145,19 @@ def test_session_start_text_runs_and_reports(fx, tmp_path):
     for bad in ([], [99], ["a"], "0"):
         with pytest.raises(SessionError):
             s.start_text(pages=bad, backend=be)
+    s.close()
+
+
+def test_session_export_includes_text(fx, tmp_path):
+    s = _session(fx, tmp_path)
+    s.start_text(pages=[0], backend=FakeOCR())
+    for _ in range(200):
+        if s.auto_status()["text"]["state"] != "running":
+            break
+        time.sleep(0.05)
+    r = s.export()
+    assert r["ok"] is True and r["counts"]["embedded"] == 1, r
+    doc = pymupdf.open(r["output"])
+    assert "次の定積分を求めよ" in doc[0].get_text()
+    doc.close()
     s.close()

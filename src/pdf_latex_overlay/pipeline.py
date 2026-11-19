@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 import pymupdf
 
-from . import __version__, coords, copycheck, embed, pdfcheck, safety
+from . import __version__, cjkfont, coords, copycheck, embed, pdfcheck, safety
 from .models import Formula, FormulaSet
 
 REPORT_SCHEMA = "pdf-latex-overlay/run-report"
@@ -84,7 +84,7 @@ class _Stop(Exception):
 def _priority(f: Formula) -> tuple:
     """重なった枠のどれを埋め込むか: 確定 > 修正済み > 小さい枠 > 先に作った枠。"""
     x0, y0, x1, y1 = f.rect
-    return (0 if f.status == "confirmed" else 1, 0 if f.edited else 1, (x1 - x0) * (y1 - y0))
+    return (1 if f.kind == "text" else 0, 0 if f.status == "confirmed" else 1, 0 if f.edited else 1, (x1 - x0) * (y1 - y0))
 
 
 def _overlap(a, b) -> float:
@@ -104,9 +104,7 @@ def classify(doc: pymupdf.Document, formulas: list[Formula], opts: Options) -> l
     candidates: list[Formula] = []
     for f in result:
         reason = None
-        if f.kind == "text":
-            reason = "text_not_embedded"  # 文章（日本語など）は、派生PDFに埋め込まない。画面でのコピーに使う
-        elif f.status in ("excluded", "error"):
+        if f.status in ("excluded", "error"):
             reason = f.reason or f"input_status:{f.status}"
         elif opts.require_confirmed and f.status != "confirmed":
             reason = "not_confirmed"
@@ -119,7 +117,9 @@ def classify(doc: pymupdf.Document, formulas: list[Formula], opts: Options) -> l
             text = embed.normalize_for_layer(f.latex)
             if coords.clamp_to_page(page, f.rect)[1]:
                 reason = "clipped"
-            elif opts.mode == "invisible" and not all(embed.is_winansi_ascii(x) for x in embed.layer_lines(f.latex)):
+            elif f.kind == "text" and cjkfont.missing_chars(f.latex):
+                reason = "unsupported_char"  # 同梱フォントにない文字（埋め込めない）
+            elif f.kind != "text" and opts.mode == "invisible" and not all(embed.is_winansi_ascii(x) for x in embed.layer_lines(f.latex)):
                 reason = "non_ascii_latex"
             elif not text:
                 reason = "no_latex"
@@ -198,7 +198,8 @@ def verify(input_path, tmp_path, embedded: list[Formula], opts: Options, input_s
                     exp = " ".join(embed.layer_lines(f.latex))
                     s = r["selections"].get(f.id)
                     count = copycheck.normalize(r["page_text"].get(str(f.page)) or "").count(copycheck.normalize(exp))
-                    if copycheck.normalize(s) != copycheck.normalize(exp) or count != 1:
+                    # 文章は、同じ文が1ページに何度か出てよい（「解答」「(1)」など）。選択結果だけを比べる
+                    if copycheck.normalize(s) != copycheck.normalize(exp) or (f.kind != "text" and count != 1):
                         fails.append({"id": f.id, "got": s, "page_count": count})
                 checks["pdfkit_copy"] = {"ok": not fails, "failed": fails, "os": r.get("os")}
             except Exception as e:  # 選択範囲の作成失敗も検証不合格

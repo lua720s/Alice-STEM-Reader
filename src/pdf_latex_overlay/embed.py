@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import pikepdf
 import pymupdf
 
+from .cjkfont import CJKFont
 from .models import Formula
 
 FONT_KEY_PREFIX = "PLOF"
@@ -77,18 +78,23 @@ MIN_HSCALE = 0.35
 _ASC, _DESC = 0.718, 0.207
 
 
-def placement(page: pymupdf.Page, rect, text: str) -> Placement:
-    """保存座標の矩形に、見た目上で横書きに収まる文字行列を作る（フォントサイズ 1 基準）。"""
+def placement(page: pymupdf.Page, rect, text: str, natural: float | None = None, asc: float = _ASC,
+              desc: float = _DESC) -> Placement:
+    """保存座標の矩形に、見た目上で横書きに収まる文字行列を作る（フォントサイズ 1 基準）。
+
+    natural は、フォントサイズ 1 のときの文字列の横幅（省略時は Helvetica）。asc・desc はそのフォントの字形の高さ。
+    """
     to_user = ~page.transformation_matrix  # 保存座標 → PDF ユーザー空間
     derot = page.derotation_matrix  # 描画座標 → 保存座標
     vis = pymupdf.Rect(rect) * page.rotation_matrix  # 見た目上の矩形
-    natural = _helv().text_length(text, fontsize=1.0)
-    fs = vis.height * BAND / (_ASC + _DESC)
+    if natural is None:
+        natural = _helv().text_length(text, fontsize=1.0)
+    fs = vis.height * BAND / (asc + desc)
     if natural > 0:
         fs = min(fs, vis.width / (natural * MIN_HSCALE))
     hs = vis.width / (natural * fs) if natural > 0 else 1.0
     cy = (vis.y0 + vis.y1) / 2
-    base_y = cy + fs * (_ASC - _DESC) / 2  # 字形の帯を矩形の上下中央に置く
+    base_y = cy + fs * (asc - desc) / 2  # 字形の帯を矩形の上下中央に置く
 
     def user(x, y):
         return pymupdf.Point(x, y) * derot * to_user
@@ -100,7 +106,8 @@ def placement(page: pymupdf.Page, rect, text: str) -> Placement:
     return Placement(tuple(round(v, 4) for v in tm), text)
 
 
-def build_ops(font_name: pikepdf.Name, pl: Placement, mode: str, actual: str | None, inner: str | None):
+def build_ops(font_name: pikepdf.Name, pl: Placement, mode: str, actual: str | None, inner: str | None,
+              data: bytes | None = None):
     ops = []
     if mode == "actualtext":
         props = pikepdf.Dictionary(ActualText=pikepdf.String(actual if actual is not None else pl.text))
@@ -111,7 +118,7 @@ def build_ops(font_name: pikepdf.Name, pl: Placement, mode: str, actual: str | N
         pikepdf.ContentStreamInstruction([3], pikepdf.Operator("Tr")),
         pikepdf.ContentStreamInstruction([font_name, 1], pikepdf.Operator("Tf")),
         pikepdf.ContentStreamInstruction(list(pl.tm), pikepdf.Operator("Tm")),
-        pikepdf.ContentStreamInstruction([pikepdf.String(text.encode("ascii"))], pikepdf.Operator("Tj")),
+        pikepdf.ContentStreamInstruction([pikepdf.String(data if data is not None else text.encode("ascii"))], pikepdf.Operator("Tj")),
         pikepdf.ContentStreamInstruction([], pikepdf.Operator("ET")),
     ]
     if mode == "actualtext":
@@ -144,15 +151,26 @@ def embed_formulas(
                 Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1,
                 BaseFont=pikepdf.Name.Helvetica, Encoding=pikepdf.Name.WinAnsiEncoding,
             ))
+            # 文章（日本語など）の枠: 使う文字だけのサブセットフォントを埋め込む
+            chars = {c for f in formulas if f.kind == "text" for ln in layer_lines(f.latex) for c in ln}
+            cj = CJKFont(pdf, chars) if chars else None
             for pno in sorted(by_page):
                 if should_stop():
                     raise InterruptedError(f"ページ{pno}の前で中断")
                 ppage = pdf.pages[pno]
                 mpage = mdoc[pno]
                 name = ppage.add_resource(font, pikepdf.Name.Font, prefix=FONT_KEY_PREFIX)
+                cname = ppage.add_resource(cj.font, pikepdf.Name.Font, prefix="PLOJ") if cj and any(
+                    f.kind == "text" for f in by_page[pno]) else None
                 ops = []
                 for f in by_page[pno]:
                     lines = layer_lines(f.latex)
+                    if f.kind == "text":  # 文章: 不可視テキスト（描画モード 3）。実際の字幅で収める
+                        for line, r in zip(lines, line_rects(mpage, f.rect, len(lines))):
+                            pl = placement(mpage, r, line, natural=cj.width(line), asc=cj.ascent, desc=cj.descent)
+                            ops += build_ops(cname, pl, "invisible", actual=line, inner=None, data=cj.encode(line))
+                        done.append(f.id)
+                        continue
                     for line, r in zip(lines, line_rects(mpage, f.rect, len(lines))):
                         inner_text = line if actualtext_inner is None else actualtext_inner
                         if mode == "invisible" and not is_winansi_ascii(line):
