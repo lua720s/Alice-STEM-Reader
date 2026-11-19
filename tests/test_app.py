@@ -182,3 +182,18 @@ def test_launch_script_branches_run_without_applescript_errors(fx, tmp_path, cho
     r = subprocess.run(["osascript", str(script)], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
     assert all(e in r.stdout for e in expect), r.stdout
+
+
+def test_opening_does_not_auto_recognize_by_default():
+    """PDFを開いただけでは、全ページを自動で認識しない（2026-11-19 のユーザー指示）。--auto で以前の動き。"""
+    import inspect
+
+    from pdf_latex_overlay import cli
+    from pdf_latex_overlay.viewer.server import serve
+
+    p = cli.build_parser()
+    assert p.parse_args(["viewer", "x.pdf"]).auto is False
+    assert p.parse_args(["viewer", "x.pdf", "--auto"]).auto is True
+    assert p.parse_args(["viewer", "x.pdf", "--no-auto"]).auto is False  # 以前の指定でも動く
+    assert inspect.signature(serve).parameters["auto"].default is False
+    assert '"auto": False' in inspect.getsource(applaunch.app_open)

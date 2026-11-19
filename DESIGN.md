@@ -86,3 +86,7 @@ macOS 27.0.1、PyMuPDF 2.1（MuPDF 1.28.6）、pikepdf 10.18.2。ベクター・
 - `appbuild.py`: AppleScript のアプレットを `osacompile` で作り、Info.plist に PDF・フォルダの文書タイプ（`LSHandlerRank = Alternate`）を足して ad-hoc 署名、LaunchServices に登録。`on open` が `app-open` を呼ぶ。
 - `applaunch.py`: 状態ファイル（`~/Library/Application Support/PDF LaTeX Overlay/server.json`、権限600、ポート・トークン）で、動いているビューアを探す。動いていれば `POST /api/addfiles` で PDF を加え、`POST /api/open`（`auto: true`）で開く。直前まで画面の通信があれば、ブラウザのタブは増やさない（画面が開いた PDF に追従する）。
 - サーバー: `GET /api/ping`（pid・無通信秒数）、`POST /api/quit`、`--idle-exit 分`（無通信で自動終了）、`--state-file`。どれもトークンが要る。
+
+## 開いたときの自動認識をやめた（2026-11-19）
+
+ユーザーの指示により、ビューアで PDF を開いても、全ページを自動で検出・認識しない（`serve(auto=False)` が既定、`--auto` で以前の動き）。`.app` の `app-open` も、開くだけで認識しない。認識は「このページを認識」か、⋯ の「OCRを行う」で行う。事前OCR（`prepare`）の結果は、これまでどおり開くと読み込まれる。

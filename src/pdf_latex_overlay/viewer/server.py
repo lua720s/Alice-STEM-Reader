@@ -229,7 +229,7 @@ def make_server(target, port: int = 0):
     return httpd, token
 
 
-def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=True,
+def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=False,
           readonly=False, verify=False, allow_external=False, state_file=None, idle_exit_min=None) -> int:
     """paths は PDF またはフォルダ（複数可）。フォルダなら左のコレクションに階層で並ぶ。"""
     paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
@@ -247,7 +247,7 @@ def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", 
         return 2
     httpd, token = make_server(hub, port)
     try:
-        if single:  # 1 つの PDF を指定したときは、そのまま開く（開いた時点で全ページを認識する）
+        if single:  # 1 つの PDF を指定したときは、そのまま開く（auto=True のときだけ、開いた時点で全ページを認識する）
             hub.scan(force=True)
             hub.open(hub.id_of(hub.roots[0]), formulas_path=formulas_path, workdir=workdir,
                      auto=bool(auto and backend not in (None, "", "none")))

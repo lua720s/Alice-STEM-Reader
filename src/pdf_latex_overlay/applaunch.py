@@ -142,7 +142,7 @@ def app_open(files: list[str] | None = None, folder: str | None = None, backend:
     opened = None
     if files:
         ids = _call(st, "POST", "/api/addfiles", {"paths": [str(Path(f).resolve()) for f in files]})["ids"]
-        _call(st, "POST", "/api/open", {"id": ids[0], "auto": backend != "none"}, timeout=60.0)
+        _call(st, "POST", "/api/open", {"id": ids[0], "auto": False}, timeout=60.0)  # 開いただけでは認識しない（「このページを認識」で行う。事前OCRの結果はそのまま読み込む）
         opened = ids[0]
     # すでに画面が開いている（直前まで通信があった）ときは、新しいタブを開かない。画面は、開いた PDF に追従する
     if fresh or st.get("idle_s", 999) > 8:
