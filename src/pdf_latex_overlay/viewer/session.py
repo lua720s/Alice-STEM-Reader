@@ -516,9 +516,16 @@ class ViewerSession:
         if pid:
             raise SessionError(f"事前処理（pid {pid}）がこの PDF を処理中のため、終わるまで編集できない", 409)
 
-    def export(self, mode: str = "invisible", only_confirmed: bool = False) -> dict:
+    def export(self, mode: str = "invisible", only_confirmed: bool = False, delim: str = "paren") -> dict:
+        from ..delims import STYLES, convert_delims
+
+        if delim not in STYLES:
+            raise SessionError("delim が不正（none / paren / dollar）")
         with self.lock:
             snapshot = FormulaSet.from_dict(self.fs.to_dict())
+        for f in snapshot.formulas:  # 文章の中の数式の区切りを、画面の設定に合わせる（数式だけの枠は、そのまま）
+            if f.kind == "text" and f.latex:
+                f.latex = convert_delims(f.latex, delim)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         out = self.workdir / "exports" / f"{self.input.stem}.latex-{stamp}.pdf"
         n = 1

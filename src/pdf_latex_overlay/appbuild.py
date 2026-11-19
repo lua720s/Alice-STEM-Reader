@@ -33,38 +33,8 @@ on buildCmd(args)
 end buildCmd
 
 on run
-	-- すでに動いているビューアがあれば、画面を開くだけ
-	set rc to do shell script (my buildCmd("app-open --if-running") & " >> " & quoted form of logf & " 2>&1; echo $?")
-	if rc is "0" then return
-	set lastF to ""
-	try
-		set lastF to do shell script (my buildCmd("app-open --print-last") & " 2>/dev/null")
-	end try
-	-- PDF を直接選ぶか、フォルダを選ぶか
-	set choice to button returned of (display dialog "開くものを選んでください" buttons {{"キャンセル", "フォルダを選ぶ", "PDFを選ぶ"}} default button "PDFを選ぶ" cancel button "キャンセル" with title "PDF LaTeX Overlay")
-	try
-		if choice is "PDFを選ぶ" then
-			if lastF is not "" then
-				set picked to choose file of type {{"com.adobe.pdf"}} with prompt "PDFを選んでください（複数可）" default location (POSIX file lastF as alias) with multiple selections allowed
-			else
-				set picked to choose file of type {{"com.adobe.pdf"}} with prompt "PDFを選んでください（複数可）" with multiple selections allowed
-			end if
-			set args to ""
-			repeat with f in picked
-				set args to args & " " & quoted form of POSIX path of f
-			end repeat
-			my startViewer(args)
-		else
-			if lastF is not "" then
-				set f to choose folder with prompt "PDFが入っているフォルダを選んでください" default location (POSIX file lastF as alias)
-			else
-				set f to choose folder with prompt "PDFが入っているフォルダを選んでください"
-			end if
-			my startViewer(" --folder " & quoted form of POSIX path of f)
-		end if
-	on error number -128
-		return -- キャンセル
-	end try
+	-- 選択画面は出さない。ビューアを起動（または画面を開く）して、開くものは画面の「開く」から選ぶ
+	my startViewer("")
 end run
 
 on open theItems

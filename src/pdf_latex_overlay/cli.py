@@ -79,7 +79,8 @@ def cmd_viewer(a) -> int:
 
     return serve(a.paths, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
                  backend=a.backend, workdir=a.workdir, auto=a.auto, readonly=a.readonly, verify=a.verify,
-                 allow_external=a.allow_external, state_file=a.state_file, idle_exit_min=a.idle_exit)
+                 allow_external=a.allow_external, state_file=a.state_file, idle_exit_min=a.idle_exit,
+                 roots_file=a.roots_file)
 
 
 def cmd_app_open(a) -> int:
@@ -327,13 +328,14 @@ def build_parser() -> argparse.ArgumentParser:
     c.set_defaults(func=cmd_copycheck)
 
     v = sub.add_parser("viewer", help="ローカルビューアを起動する（127.0.0.1 のみ）。フォルダを渡すと左にコレクションが並ぶ")
-    v.add_argument("paths", nargs="+", help="PDF またはフォルダ（複数可）")
+    v.add_argument("paths", nargs="*", help="PDF またはフォルダ（複数可。なければ、画面の「開く」から選ぶ）")
     v.add_argument("--formulas", default=None, help="式 JSON（なければ作業領域に新規作成）")
     v.add_argument("--workdir", default=None)
     v.add_argument("--port", type=int, default=0)
     v.add_argument("--backend", default="none", help="認識エンジン（none / unimernet[=base] / unimernet_tiny / ppformulanet / mathpix）。画面の「エンジン」でも切り替えられる")
     v.add_argument("--allow-external", action="store_true", help="Mathpix など外部サービスへ画像を送ることに同意する（--backend mathpix に必要）")
     v.add_argument("--no-open", action="store_true")
+    v.add_argument("--roots-file", default=None, help="画面から追加したフォルダを覚えておく場所（.app 用）")
     v.add_argument("--state-file", default=None, help="接続情報（ポート・トークン）を書き出す場所（.app 用）")
     v.add_argument("--idle-exit", type=float, default=None, metavar="分", help="画面からの通信がこの分数なければ終了する（.app 用）")
     v.add_argument("--auto", action="store_true", help="PDF を1つだけ指定して開いたとき、全ページを自動で検出・認識する（既定ではしない。「このページを認識」で行う）")

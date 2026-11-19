@@ -49,6 +49,7 @@
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
     </button>
   </div>
+  <button id="settings-btn" class="icon-btn" title="設定" aria-label="設定" data-i18n-title="設定" data-i18n-label="設定" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
 </header>
 
 <div id="layout" class="sb-open">
@@ -56,6 +57,9 @@
     <div class="sb-head">
       <span class="sb-title" data-i18n="コレクション">コレクション</span>
       <span class="spacer"></span>
+      <button id="tree-open" class="icon-btn small" title="PDFまたはフォルダを開く" aria-label="PDFまたはフォルダを開く" data-i18n-title="PDFまたはフォルダを開く" data-i18n-label="PDFまたはフォルダを開く" aria-haspopup="menu">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
       <button id="tree-newfolder" class="icon-btn small" title="新しいフォルダ" aria-label="新しいフォルダ" data-i18n-title="新しいフォルダ" data-i18n-label="新しいフォルダ">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
       </button>
@@ -93,6 +97,7 @@
       <div id="emptydeck">
         <div>
           <p class="big" data-i18n="PDFを選んでください">PDFを選んでください</p>
+          <p><button id="empty-open-pdf" type="button" class="primary" data-i18n="PDFを開く…">PDFを開く…</button> <button id="empty-open-folder" type="button" data-i18n="フォルダを追加…">フォルダを追加…</button></p>
           <p class="muted"><span data-i18n="左のコレクションからPDFを選ぶと、ページが1枚ずつ表示されます。"></span><br>
             <kbd>←</kbd><kbd>→</kbd> <span data-i18n="でページ送り、"></span><kbd>F</kbd> <span data-i18n="で表示の切り替え、"></span><kbd>B</kbd> <span data-i18n="でコレクションの開閉。"></span></p>
         </div>
@@ -181,6 +186,22 @@
       <button type="button" id="dlg-cancel" data-i18n="キャンセル">キャンセル</button>
       <button type="submit" id="dlg-ok" class="primary">OK</button>
     </div>
+  </form>
+</dialog>
+<dialog id="settings" aria-labelledby="settings-title">
+  <form method="dialog" id="settings-form">
+    <h2 id="settings-title" data-i18n="設定">設定</h2>
+    <fieldset>
+      <legend data-i18n="数式の区切り記号">数式の区切り記号</legend>
+      <p class="muted" data-i18n="コピーする文字列と、PDFに埋め込む文章の中の数式に、区切りを付けるかどうか、どの書き方にするかを選びます。">コピーする文字列と、PDFに埋め込む文章の中の数式に、区切りを付けるかどうか、どの書き方にするかを選びます。</p>
+      <label class="radio"><input type="radio" name="delim" value="paren"> <code>\( … \)</code>・<code>\[ … \]</code></label>
+      <label class="radio"><input type="radio" name="delim" value="dollar"> <code>$ … $</code>・<code>$$ … $$</code></label>
+      <label class="radio"><input type="radio" name="delim" value="none"> <span data-i18n="付けない（区切りなし）">付けない（区切りなし）</span></label>
+      <label class="radio check"><input type="checkbox" id="set-single"> <span data-i18n="数式だけの枠のコピーにも、区切りを付ける">数式だけの枠のコピーにも、区切りを付ける</span></label>
+      <div class="muted" data-i18n="例">例</div>
+      <pre id="set-sample" aria-live="polite"></pre>
+    </fieldset>
+    <div class="dlg-actions"><button type="submit" class="primary" data-i18n="閉じる">閉じる</button></div>
   </form>
 </dialog>
 <div id="toast" role="status" aria-live="polite"></div>

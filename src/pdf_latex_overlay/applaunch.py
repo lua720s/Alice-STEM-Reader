@@ -29,6 +29,10 @@ def state_path() -> Path:
     return support_dir() / "server.json"
 
 
+def roots_path() -> Path:
+    return support_dir() / "roots.json"
+
+
 def config_path() -> Path:
     return support_dir() / "app.json"
 
@@ -104,7 +108,7 @@ def _spawn(roots: list[str], backend: str, wait_s: float) -> dict:
     lp = log_path()
     lp.parent.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "pdf_latex_overlay", "viewer", *roots, "--no-open", "--backend", backend,
-           "--state-file", str(sp), "--idle-exit", str(IDLE_EXIT_MIN)]
+           "--state-file", str(sp), "--roots-file", str(roots_path()), "--idle-exit", str(IDLE_EXIT_MIN)]
     with open(lp, "ab") as log:
         subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
     t0 = time.monotonic()
@@ -131,14 +135,10 @@ def app_open(files: list[str] | None = None, folder: str | None = None, backend:
     st = running_state()
     fresh = st is None
     if fresh:
-        roots = [folder] if folder else ([last_folder()] if last_folder() else [])
-        if not roots and files:
-            roots = [str(Path(files[0]).resolve().parent)]
-        if not roots:
-            raise ValueError("開くフォルダまたはPDFがない")
-        st = _spawn(roots, backend, wait_s)
+        # 何も指定されなくても起動する（開くものは、ビューアの画面の「開く」で選ぶ）。前に追加したフォルダは、並ぶ
+        st = _spawn([folder] if folder else [], backend, wait_s)
     elif folder:
-        raise ValueError("ビューアはすでに動いている。フォルダを変えるには、先に app-stop で止める")
+        _call(st, "POST", "/api/addroot", {"path": folder})
     opened = None
     if files:
         ids = _call(st, "POST", "/api/addfiles", {"paths": [str(Path(f).resolve()) for f in files]})["ids"]

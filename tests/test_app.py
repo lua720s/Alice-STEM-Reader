@@ -128,8 +128,6 @@ def test_app_open_rejects_bad_input(tmp_path, monkeypatch):
         applaunch.app_open(files=[str(tmp_path / "none.pdf")], backend="none", opener=lambda u: None)
     with pytest.raises(ValueError):
         applaunch.app_open(folder=str(tmp_path / "nofolder"), backend="none", opener=lambda u: None)
-    with pytest.raises(ValueError):
-        applaunch.app_open(backend="none", opener=lambda u: None)  # 開くものがない
 
 
 @pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("osacompile"), reason="macOS のみ")
@@ -147,41 +145,41 @@ def test_build_app_has_open_with_pdf_and_is_signed(tmp_path):
     assert (app / "Contents" / "Resources" / "Scripts" / "main.scpt").exists()
 
 
-def test_launch_dialog_offers_pdf_and_folder():
+def test_launch_script_has_no_chooser_dialog():
+    """起動時の「開くものを選んでください」の画面をなくした。選ぶのは、ビューアの画面の「開く」。"""
     from pdf_latex_overlay.appbuild import applescript
 
     src = applescript("/x/python", "/x/log")
-    assert 'choose file of type {"com.adobe.pdf"}' in src and "multiple selections allowed" in src  # PDFを直接選べる
-    assert "choose folder" in src and '"PDFを選ぶ"' in src and '"フォルダを選ぶ"' in src
-    assert "(" not in src.split("buttons", 1)[1].split("default button", 1)[0]  # 括弧が混ざっていない（f-string の波括弧の取り違え）
-    assert "app-open --folder" not in src and '" --folder "' in src
+    run = src.split("on run", 1)[1].split("end run", 1)[0]
+    assert "display dialog" not in src and "choose folder" not in src and "choose file" not in src
+    assert 'startViewer("")' in run  # 何も渡さずに、ビューアを起動する
+    assert "on open theItems" in src  # Finder の「このアプリケーションで開く」・ドロップは、そのまま使える
 
 
-@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("osascript"), reason="macOS のみ")
-@pytest.mark.parametrize("choice,expect", [("PDFを選ぶ", ["a.pdf", "b.pdf"]), ("フォルダを選ぶ", ["--folder"])])
-def test_launch_script_branches_run_without_applescript_errors(fx, tmp_path, choice, expect):
-    """ダイアログだけ置き換えて、実際に AppleScript を実行する（予約語の変数名などの実行時エラーを検出する）。"""
-    from pdf_latex_overlay.appbuild import applescript
-
-    a, b = _pdf(fx, tmp_path, "a.pdf"), _pdf(fx, tmp_path, "b.pdf")
-    out = []
-    for line in applescript("/usr/bin/true", "/dev/null").split("\n"):
-        if "set rc to do shell script" in line:
-            line = '\tset rc to "1"'
-        if line.strip().startswith("set lastF to do shell script"):
-            line = '\t\tset lastF to ""'
-        if "display dialog" in line:
-            line = f'\tset choice to "{choice}"'
-        if "set picked to choose file" in line:
-            line = f'\t\t\tset picked to {{POSIX file "{a}" as alias, POSIX file "{b}" as alias}}'
-        if "set f to choose folder" in line:
-            line = f'\t\t\tset f to POSIX file "{tmp_path}" as alias'
-        out.append(line)
-    script = tmp_path / "stub.applescript"
-    script.write_text("\n".join(out).replace("my startViewer(", "return ("), encoding="utf-8")
-    r = subprocess.run(["osascript", str(script)], capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0, r.stderr
-    assert all(e in r.stdout for e in expect), r.stdout
+def test_app_open_without_arguments_starts_the_viewer_and_opens_the_browser(fx, tmp_path, monkeypatch):
+    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "app.log"))
+    monkeypatch.setenv("PLO_LIBRARY", str(tmp_path / "lib"))
+    opened = []
+    try:
+        r = applaunch.app_open(backend="none", opener=opened.append)  # 開くものを何も指定しない
+        assert r["fresh"] and r["opened"] is None and len(opened) == 1
+        st = applaunch.running_state()
+        base = f"http://127.0.0.1:{st['port']}"
+        folder = tmp_path / "教材"
+        _pdf(fx, folder, "a.pdf")
+        # 動いているビューアに、フォルダを足せる（画面の「開く」と同じ API）。覚えておく
+        r2 = applaunch.app_open(folder=str(folder), backend="none", opener=opened.append)
+        assert not r2["fresh"] and r2["pid"] == r["pid"]
+        _, tree = _req(base, st["token"], "GET", "/api/tree")[0], _req(base, st["token"], "GET", "/api/tree")[1]
+        assert any(x["name"] == "教材" for x in tree["roots"])
+        assert json.loads(applaunch.roots_path().read_text(encoding="utf-8")) == [str(folder.resolve())]
+    finally:
+        applaunch.app_stop()
+    for _ in range(100):
+        if applaunch.running_state() is None:
+            break
+        time.sleep(0.1)
 
 
 def test_opening_does_not_auto_recognize_by_default():

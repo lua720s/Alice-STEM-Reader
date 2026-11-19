@@ -17,6 +17,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -52,8 +54,9 @@ def engine_list() -> list[dict]:
 
 class Hub:
     def __init__(self, roots, backend="none", backend_obj=None, detector=None, library=None, auto_on_open=False,
-                 readonly=False, trash_dir=None, verify=False, verify_backend_obj=None, allow_external=False):
+                 readonly=False, trash_dir=None, verify=False, verify_backend_obj=None, allow_external=False, roots_file=None):
         self.roots = [Path(r).resolve() for r in roots]
+        self.roots_file = Path(roots_file) if roots_file else None  # 画面から追加したフォルダの覚え場所（.app 用）
         self._vfs: VFS | None = None  # ビューア専用のフォルダ構造（最初に使うときに読み込む）
         self.last_request = time.monotonic()
         for r in self.roots:
@@ -171,6 +174,57 @@ class Hub:
                 ids.append(file_id(q))
             self.scan(force=True)
         return ids
+
+    def add_root(self, folder) -> str:
+        """画面から、PC のフォルダをコレクションに加える（覚えておき、次の起動でも並ぶ）。キーを返す。"""
+        q = Path(folder).expanduser() if isinstance(folder, str) else None
+        if q is None or q.is_symlink() or not q.is_dir():
+            raise SessionError("フォルダが見つからない", 400)
+        q = q.resolve()
+        with self.lock:
+            if not any(r == q or (r.is_dir() and q.is_relative_to(r)) for r in self.roots):
+                self.roots.append(q)
+                self._persist_roots()
+            self.scan(force=True)
+            ri = next((i for i, r in enumerate(self.roots) if r == q), None)
+            return f"r{ri}" if ri is not None else ""
+
+    def _persist_roots(self):
+        if self.roots_file is None:
+            return
+        try:
+            self.roots_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.roots_file.with_name(self.roots_file.name + ".tmp")
+            tmp.write_text(json.dumps([str(r) for r in self.roots if r.is_dir()], ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, self.roots_file)
+        except OSError:
+            pass
+
+    def pick(self, kind: str) -> dict:
+        """macOS の選択画面（Finder の「開く」）を出して、選んだ PDF・フォルダを加える。ビューアの中から開けるようにするため。"""
+        if kind not in ("pdf", "folder"):
+            raise SessionError("kind が不正（pdf か folder）")
+        if sys.platform != "darwin":
+            raise SessionError("この環境では、選択画面を出せない（macOS のみ）", 501)
+        if kind == "pdf":
+            script = ('tell current application to activate\n'
+                      'set fs to choose file of type {"com.adobe.pdf"} with prompt "PDFを選んでください（複数可）" with multiple selections allowed\n'
+                      'set out to ""\nrepeat with f in fs\nset out to out & POSIX path of f & linefeed\nend repeat\nreturn out')
+        else:
+            script = ('tell current application to activate\n'
+                      'set f to choose folder with prompt "PDFが入っているフォルダを選んでください"\nreturn POSIX path of f')
+        try:
+            r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=900)
+        except (OSError, subprocess.TimeoutExpired):
+            raise SessionError("選択画面を出せなかった", 500)
+        paths = [ln for ln in r.stdout.splitlines() if ln.strip()]
+        if r.returncode != 0 or not paths:
+            return {"cancelled": True}  # キャンセル
+        if kind == "folder":
+            return {"added": 1, "root": self.add_root(paths[0])}
+        ids = self.add_paths(paths)
+        self.open(ids[0], auto=False)
+        return {"added": len(ids), "opened": ids[0]}
 
     def touch(self):
         self.last_request = time.monotonic()

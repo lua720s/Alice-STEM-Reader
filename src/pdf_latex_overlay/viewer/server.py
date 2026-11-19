@@ -104,6 +104,12 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                     return self._json(200, hub.tree(refresh=q.get("refresh", ["0"])[0] == "1"))
                 if method == "GET" and path == "/api/ping":
                     return self._json(200, {"ok": True, "pid": os.getpid(), "idle_s": round(hub.idle_s(), 1)})
+                if method == "POST" and path == "/api/addroot":
+                    b = self._body()
+                    return self._json(200, {"root": hub.add_root(b.get("path"))})
+                if method == "POST" and path == "/api/pick":
+                    b = self._body()
+                    return self._json(200, hub.pick(b.get("kind")))
                 if method == "POST" and path == "/api/quit":
                     self._json(200, {"ok": True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -204,7 +210,8 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                     mode = b.get("mode", "invisible")
                     if mode not in ("invisible", "actualtext"):
                         raise SessionError("mode が不正")
-                    return self._json(200, session.export(mode=mode, only_confirmed=bool(b.get("only_confirmed"))))
+                    return self._json(200, session.export(mode=mode, only_confirmed=bool(b.get("only_confirmed")),
+                                                          delim=b.get("delim", "paren")))
                 return self._json(404, {"error": "not found"})
             except SessionError as e:
                 return self._json(e.status, {"error": str(e)})
@@ -257,11 +264,18 @@ def make_server(target, port: int = 0):
 
 
 def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=False,
-          readonly=False, verify=False, allow_external=False, state_file=None, idle_exit_min=None) -> int:
+          readonly=False, verify=False, allow_external=False, state_file=None, idle_exit_min=None,
+          roots_file=None) -> int:
     """paths は PDF またはフォルダ（複数可）。フォルダなら左のコレクションに階層で並ぶ。"""
     paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
+    if roots_file:  # 前に画面から追加したフォルダも、並べる
+        try:
+            saved = json.loads(Path(roots_file).read_text(encoding="utf-8"))
+            paths += [p for p in saved if isinstance(p, str) and Path(p).is_dir() and p not in [str(x) for x in paths]]
+        except (OSError, ValueError):
+            pass
     try:
-        hub = Hub(paths, backend=backend, auto_on_open=False, readonly=readonly, verify=verify, allow_external=allow_external)
+        hub = Hub(paths, backend=backend, auto_on_open=False, readonly=readonly, verify=verify, allow_external=allow_external, roots_file=roots_file)
     except RecognizerUnavailable as e:  # 検証用のモデルがない
         print(str(e), file=sys.stderr)
         return 8

@@ -96,3 +96,9 @@ macOS 27.0.1、PyMuPDF 2.1（MuPDF 1.28.6）、pikepdf 10.18.2。ベクター・
 - **削除**: `DELETE /api/formulas/<id>` は、消した枠の中身も返す。`POST /api/formulas/restore`（元に戻す）と、`POST /api/formulas/delete_many`（ページ単位、scope は text / all）を追加。履歴（history.jsonl）には、`delete`・`delete_many`・`restore` が残る。
 - **メモ**: `GET/POST /api/notes`。ライブラリの `<ハッシュ>/notes.json`（`{doc, pages:{"0":…}, updated}`）。PDF 本体は変えない。1つ10万文字まで。
 - **ビューア専用のフォルダ**: `viewer/vfs.py`。ライブラリ直下の `collections.json`（`folders`、`items:[{sha, name, folder}]`）。PDF は中身の sha256 で指す（ファイルを動かしても追従）。ツリーの一番下に仮想のルート（キー `v`、フォルダは `v/<id>`）を出し、PDF の行は `rowKey`（`vf:<フォルダ>:<sha>`）で実際の PDF の行と区別する。`/api/vfs/{mkdir,rename,delete,add,remove,move}`。実際のファイルには、一切触れない。
+
+## 設定（数式の区切り）と、起動時の選択画面の統合（2026-11-19）
+
+- **区切り**: 内部のデータは変えず、コピー（`outText`）と、保存時の文章の枠（`export(delim=…)`、`delims.convert_delims`）で変換する。規則は `delims.py` と `app.js` で同じ（`\( \)`→`$ $`、`\[ \]`→`$$ $$`、なし）。
+- **起動時の選択画面をなくした**: `.app` の `on run` は、何も渡さずに `app-open` を呼ぶだけ。ビューアは、開くものがなくても起動できる（`Hub([])`）。開くものは、ビューアの中の「＋」から選ぶ: `POST /api/pick`（`kind`: pdf / folder）が、サーバー側で `osascript` の `choose file` / `choose folder` を出し、選んだものを加える。固定の文面だけを実行し、利用者の入力は渡さない。macOS 以外では 501。
+- **フォルダの記憶**: 画面から加えたフォルダを `roots.json`（`~/Library/Application Support/PDF LaTeX Overlay/`）に保存し、次の起動で並べる（`--roots-file`）。`POST /api/addroot` で、動いているビューアにも足せる。

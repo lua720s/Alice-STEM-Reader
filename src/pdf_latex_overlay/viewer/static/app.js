@@ -358,8 +358,29 @@ async function copyText(text) {
   catch (e) { toast(T("コピーできませんでした（ブラウザの許可を確認）"), 4000); }
 }
 
+// ---- 設定: 数式の区切り記号（コピーと、PDFに埋め込む文章に反映する）
+const settings = { delim: LS.get("plo-delim", "paren"), single: LS.get("plo-delim-single", "0") === "1" };
+if (!["none", "paren", "dollar"].includes(settings.delim)) settings.delim = "paren";
+const DELIM_TOKEN = /\\[()\[\]]/g;
+function convertDelims(text, style) {  // 内部の \(…\)・\[…\] を、選んだ書き方に（delims.py と同じ規則）
+  if (style === "paren" || !text) return text;
+  if (style === "none") return text.replace(DELIM_TOKEN, "");
+  return text.replace(DELIM_TOKEN, (m) => (m === "\\[" || m === "\\]" ? "$$" : "$"));
+}
+function wrapSingle(latex, style) {  // 数式だけの枠に、区切りを付ける（1行は行内、複数行は表示数式）
+  const t = latex.replace(/^\n+|\n+$/g, "");
+  if (style === "none" || !t.trim()) return latex;
+  const multi = t.trim().includes("\n");
+  if (style === "paren") return multi ? "\\[" + t + "\\]" : "\\(" + t + "\\)";
+  return multi ? "$$" + t + "$$" : "$" + t + "$";
+}
+function outText(f, text) {  // コピーする文字列（文章の枠は、中の区切りを変える。数式だけの枠は、設定で区切りを付ける）
+  if (f && f.kind === "text") return convertDelims(text, settings.delim);
+  return settings.single ? wrapSingle(text, settings.delim) : text;
+}
+
 async function copyLatex() {
-  const text = $("latex").value;
+  const text = outText(state.formulas.find((x) => x.id === state.selected), $("latex").value);
   if (!text) { toast(T("コピーする LaTeX がありません")); return; }
   try { await navigator.clipboard.writeText(text); toast(T("LaTeX をコピーしました")); }
   catch (e) { $("latex").select(); document.execCommand("copy"); toast(T("LaTeX をコピーしました")); }
@@ -394,7 +415,7 @@ window.addEventListener("mouseup", async (ev) => {
   if (!drag) return;
   const d = drag; drag = null;
   if (!d.moved) {
-    if (d.hitId) { select(d.hitId); const f = state.formulas.find((x) => x.id === d.hitId); if (f && f.latex) copyText(f.latex); }
+    if (d.hitId) { select(d.hitId); const f = state.formulas.find((x) => x.id === d.hitId); if (f && f.latex) copyText(outText(f, f.latex)); }
     return;
   }
   const r = d.div.getBoundingClientRect(), s = pageScale(d.div);
@@ -1176,7 +1197,7 @@ function wire() {
     if (!state.doc) { toast(T("PDFを選んでください。")); return; }
     $("export").disabled = true; toast(T("派生PDFを作成・検証しています…"), 60000);
     try {
-      const r = await api("POST", "/api/export", { mode: $("mode").value, only_confirmed: $("onlyconfirmed").checked });
+      const r = await api("POST", "/api/export", { mode: $("mode").value, only_confirmed: $("onlyconfirmed").checked, delim: settings.delim });
       const ex = r.excluded.filter((x) => x.reason && x.reason !== "user").map((x) => `${x.id}: ${x.reason}`);
       if (r.ok) toast(T("保存しました（埋め込み {e} 件、除外 {x} 件）\n{out}{extra}", { e: r.counts.embedded, x: r.counts.excluded, out: r.output, extra: ex.length ? "\n" + ex.join("\n") : "" }), 10000);
       else toast(T("保存しませんでした（終了コード {c}）\n{errs}{checks}", { c: r.exit_code, errs: r.errors.join("\n"), checks: r.failed_checks.length ? T("\n検証不合格: {c}", { c: r.failed_checks.join(", ") }) : "" }), 10000);
@@ -1279,3 +1300,37 @@ document.addEventListener("plo-lang", () => {
     if (state.doc) { $("stats").textContent = ""; refresh(); updateAutoStatus(); document.querySelectorAll("#pages img").forEach((im, i) => { im.alt = T("ページ {n}", { n: i + 1 }); }); }
   } catch (e) { /* 次の更新で反映 */ }
 });
+
+
+// 設定の画面
+function renderSettings() {
+  for (const r of document.querySelectorAll('#settings input[name="delim"]')) r.checked = r.value === settings.delim;
+  $("set-single").checked = settings.single;
+  $("set-single").disabled = settings.delim === "none";
+  const mixed = "(1) \\(x^{2}+1\\) \\[a=b\\]";
+  $("set-sample").textContent = convertDelims(mixed, settings.delim) + "\n" + wrapSingle("x^{2}+1", settings.single ? settings.delim : "none");
+}
+$("settings-btn").addEventListener("click", () => { renderSettings(); $("settings").showModal(); });
+for (const r of document.querySelectorAll('#settings input[name="delim"]')) {
+  r.addEventListener("change", () => { settings.delim = r.value; LS.set("plo-delim", r.value); renderSettings(); });
+}
+$("set-single").addEventListener("change", () => { settings.single = $("set-single").checked; LS.set("plo-delim-single", settings.single ? "1" : "0"); renderSettings(); });
+
+
+// ---- PDF・フォルダを開く（macOS の選択画面を、ビューアの中から出す。.app の起動時の選択画面は、これに統合した）
+async function pickOpen(kind) {
+  try {
+    toast(T("選択画面を開いています…"), 4000);
+    const r = await api("POST", "/api/pick", { kind });
+    if (r.cancelled) { toast(T("キャンセルしました"), 1500); return; }
+    await loadTree(true);
+    if (kind === "folder") { toast(T("フォルダを追加しました"), 2000); const k = r.root; if (k) { tree.expanded.add(k); saveExpanded(); renderTree(); } }
+    else { await loadDoc(); toast(T("PDFを開きました"), 1500); }
+  } catch (e) { toast(T("開けませんでした: {m}", { m: e.message }), 5000); }
+}
+$("tree-open").addEventListener("click", () => {
+  const r = $("tree-open").getBoundingClientRect();
+  showMenu(r.left, r.bottom + 4, [{ label: T("PDFを開く…"), run: () => pickOpen("pdf") }, { label: T("フォルダを追加…"), run: () => pickOpen("folder") }], $("tree-open"));
+});
+$("empty-open-pdf").addEventListener("click", () => pickOpen("pdf"));
+$("empty-open-folder").addEventListener("click", () => pickOpen("folder"));
