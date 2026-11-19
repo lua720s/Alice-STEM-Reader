@@ -154,6 +154,9 @@ main { display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns:
 .box:hover { background: rgba(33, 96, 196, .2); }
 .box.excluded { border-style: dashed; border-color: var(--muted); background: transparent; }
 .box.confirmed { border-color: var(--ok); }
+.box.text { border-color: #2a9d8f; background: rgba(42, 157, 143, .10); }
+.box.text.selected { border-color: var(--sel); }
+.preview.plain { font-size: 15px; line-height: 1.6; white-space: pre-wrap; text-align: left; }
 .box.review { border-color: var(--warn); border-style: dashed; background: rgba(224, 160, 60, .16); }
 .box.review::after { content: "!"; position: absolute; right: -8px; top: -8px; width: 15px; height: 15px; border-radius: 50%;
   background: var(--warn); color: #fff; font: 700 11px/15px sans-serif; text-align: center; }

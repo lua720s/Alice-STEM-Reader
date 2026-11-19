@@ -148,6 +148,9 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "POST" and path == "/api/auto":
                     b = self._body()  # {"pages": [0 始まりのページ番号], "force": true}（省略すると全ページ）
                     return self._json(200, session.start_auto(pages=b.get("pages"), force=bool(b.get("force"))))
+                if method == "POST" and path == "/api/text":
+                    b = self._body()  # {"pages": [0 始まり], "force": true}: 文章（日本語など）を読む
+                    return self._json(200, session.start_text(pages=b.get("pages"), force=bool(b.get("force"))))
                 m = re.fullmatch(r"/api/page/(\d+)\.png", path)
                 if method == "GET" and m:
                     dpi = int(q.get("dpi", ["110"])[0])

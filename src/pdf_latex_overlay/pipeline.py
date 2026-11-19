@@ -104,7 +104,9 @@ def classify(doc: pymupdf.Document, formulas: list[Formula], opts: Options) -> l
     candidates: list[Formula] = []
     for f in result:
         reason = None
-        if f.status in ("excluded", "error"):
+        if f.kind == "text":
+            reason = "text_not_embedded"  # 文章（日本語など）は、派生PDFに埋め込まない。画面でのコピーに使う
+        elif f.status in ("excluded", "error"):
             reason = f.reason or f"input_status:{f.status}"
         elif opts.require_confirmed and f.status != "confirmed":
             reason = "not_confirmed"

@@ -702,6 +702,12 @@ class Hub:
             self._ocr["cancel"] = True
             if self._ocr_thread is not None:
                 self._ocr_thread.join(timeout=30)
+        try:
+            from ..recognize.textocr import close_shared
+
+            close_shared()
+        except Exception:
+            pass
         with self.lock:
             if self._lock_cm is not None or self.session is not None:
                 self._release()

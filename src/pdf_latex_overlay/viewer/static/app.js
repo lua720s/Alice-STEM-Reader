@@ -215,7 +215,7 @@ async function refresh() {
   const d = await api("GET", "/api/formulas");
   state.formulas = d.formulas;
   drawBoxes();
-  const n = state.formulas.length, conf = state.formulas.filter((f) => f.status === "confirmed").length;
+  const fo = state.formulas.filter((f) => f.kind !== "text"), n = fo.length, conf = fo.filter((f) => f.status === "confirmed").length;
   $("stats").textContent = T("式 {n} 件・確定 {c} 件", { n, c: conf }) + (state.doc.verify ? T("・2モデルで検証") : "");
   const rv = reviewList().length;
   $("reviewbtn").hidden = rv === 0; $("reviewcount").textContent = T("要確認 {n} 件 →", { n: rv });
@@ -253,7 +253,7 @@ function drawBoxes() {
     for (const f of state.formulas.filter((x) => x.page === pno && x.view_rect)) {
       const [x0, y0, x1, y1] = f.view_rect;
       const b = document.createElement("div");
-      b.className = `box ${f.status}${f.edited ? " edited" : ""}${f.review ? " review" : ""}${f.id === state.selected ? " selected" : ""}`;
+      b.className = `box ${f.status}${f.kind === "text" ? " text" : ""}${f.edited ? " edited" : ""}${f.review ? " review" : ""}${f.id === state.selected ? " selected" : ""}`;
       Object.assign(b.style, { left: `${x0 * s}px`, top: `${y0 * s}px`, width: `${(x1 - x0) * s}px`, height: `${(y1 - y0) * s}px` });
       b.title = f.latex || T("(LaTeX なし)");
       b.dataset.id = f.id;
@@ -274,6 +274,9 @@ function select(id) {
 function renderPreview(latex) { renderPreviewInto($("preview"), latex); }
 function renderPreviewInto(el, latex) {
   el.textContent = "";
+  const sel = state.formulas.find((f) => f.id === state.selected);
+  if (el === $("preview") && sel && sel.kind === "text") { el.textContent = latex || ""; el.classList.add("plain"); return; }  // 文章は、数式として描かない
+  el.classList.remove("plain");
   if (!latex) { el.textContent = T("（LaTeX なし）"); return; }
   if (window.katex) {
     const lines = latex.split("\n").filter((x) => x.trim());
@@ -288,6 +291,7 @@ async function showDetail(f) {
   if (!f) { $("detail").hidden = true; $("empty").hidden = false; return; }
   $("detail").hidden = false; $("empty").hidden = true;
   $("fid").textContent = f.id;
+  $("recognize").hidden = f.kind === "text";  // 文章の枠は、数式の再認識の対象外
   $("fstatus").textContent = f.status;
   $("fsource").textContent = `${f.source}${f.confidence != null ? T(" / 信頼度 {c}", { c: f.confidence.toFixed(2) }) : ""}${f.edited ? T(" / 修正済み") : ""}`;
   if (document.activeElement !== $("latex")) $("latex").value = f.latex || "";
@@ -925,6 +929,7 @@ async function loadDoc(knownEmpty = false) {
   $("stats").textContent = "";
   $("autostat").textContent = "";
   $("autorun").disabled = !doc || !doc.backend || doc.backend === "none";
+  $("textrun").disabled = !doc;
   $("doc-menu").disabled = !doc;
   $("autorun").classList.remove("attention");
   if (!doc) { imgObserver.disconnect(); pagesEl.textContent = ""; slots = []; updatePageUI(); return; }
@@ -955,6 +960,12 @@ function wire() {
     if (!state.doc) return;
     const n = state.cur;
     act(() => api("POST", "/api/auto", { pages: [n], force: true }), T("{n} ページ目の認識を始めました", { n: n + 1 }));
+  };
+  // 「このページの文章を認識」: 日本語などの文章を読む（数式の枠は読まない）。初回はモデルの取得・読み込みで時間がかかる
+  $("textrun").onclick = () => {
+    if (!state.doc) return;
+    const n = state.cur;
+    act(() => api("POST", "/api/text", { pages: [n], force: true }), T("{n} ページ目の文章の認識を始めました", { n: n + 1 }));
   };
   $("reviewbtn").onclick = () => nextReview(1);
   $("usealt").onclick = () => {
@@ -1023,8 +1034,12 @@ async function updateAutoStatus() {
     if (state.doc) {
       const a = await api("GET", "/api/auto");
       const el = $("autostat");
-      tree.fast = a.state === "running" || a.state === "preparing";
-      if (a.state === "running") {
+      tree.fast = a.state === "running" || a.state === "preparing" || (a.text && a.text.state === "running");
+      if (a.text && a.text.state === "running") {
+        el.textContent = T("文章を認識中… {p}/{n} ページ", { p: a.text.page || 0, n: a.text.pages || 0 });
+      } else if (a.text && a.text.state === "error") {
+        el.textContent = T("文章の認識に失敗: {m}", { m: a.text.error });
+      } else if (a.state === "running") {
         el.textContent = a.phase === "detect" ? T("数式を検出中… {p}/{n} ページ", { p: a.page, n: a.pages }) : T("認識中… {r}/{t}", { r: a.recognized, t: a.total || 0 });
       } else if (a.state === "preparing") {
         el.textContent = T("事前処理中（終わるまで表示のみ。結果は順に反映）");

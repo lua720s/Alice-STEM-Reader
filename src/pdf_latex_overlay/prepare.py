@@ -162,7 +162,7 @@ def process_document(pdf_path, fs: FormulaSet, *, detector, backend, lock=None,
                 n = 0
                 for d in hits:
                     # 既にある枠（手で描いた枠を含む）と重なるものは追加しない
-                    if any(g.page == pno and (coords.iou(g.rect, d["rect"]) > 0.5 or _contained(d["rect"], g.rect) > 0.8)
+                    if any(g.page == pno and g.kind != "text" and (coords.iou(g.rect, d["rect"]) > 0.5 or _contained(d["rect"], g.rect) > 0.8)
                            for g in fs.formulas):
                         continue
                     n += 1
@@ -302,3 +302,59 @@ def prepare_one(pdf: Path, *, detector, backend, library=None, should_stop=lambd
             return {"pdf": str(pdf), "entry": d.name, "elapsed_s": elapsed, **r, "meta_state": meta["state"]}
     except FileExistsError:
         return {"pdf": str(pdf), "state": "skipped", "reason": "別の事前処理が実行中", "entry": d.name}
+
+
+def process_text(pdf_path, fs: FormulaSet, *, text_backend, lock=None, save: Callable[[], None] = lambda: None,
+                 progress: Callable[..., None] = lambda **k: None, log: Callable[..., None] = lambda *a, **k: None,
+                 should_stop: Callable[[], bool] = lambda: False, only_pages=None, force: bool = False, detector=None) -> dict:
+    """文章（日本語など）を行ごとに読んで、種類 text の枠として fs に加える。数式の枠は塗りつぶして読まない。
+
+    force なら、処理済みのページも読み直す（そのページの、修正・確定していない文章の枠は置き換える）。
+    戻り値: {"state": done|interrupted, "lines": n}
+    """
+    from .detect.mfd import detect_page
+    from .recognize.textocr import ocr_page_text
+
+    lk = lock or contextlib.nullcontext()
+    doc = pymupdf.open(pdf_path)
+    lines = 0
+    try:
+        pages = sorted({int(p) for p in only_pages if 0 <= int(p) < doc.page_count}) if only_pages is not None \
+            else list(range(doc.page_count))
+        for i, pno in enumerate(pages):
+            progress(phase="text", page=i + 1, pages=len(pages))
+            with lk:
+                if pno in set(fs.meta.get("text_pages", [])) and not force:
+                    continue
+                avoid = [pymupdf.Rect(f.rect) * doc[pno].rotation_matrix for f in fs.formulas
+                         if f.page == pno and f.kind != "text" and f.status != "excluded"]
+                undetected = detector is not None and pno not in set(fs.meta.get("auto_pages", []))
+            if should_stop():
+                return {"state": "interrupted", "lines": lines}
+            if undetected:  # 数式をまだ検出していないページは、塗りつぶすために検出だけしておく（枠は足さない）
+                avoid += [pymupdf.Rect(d["view"]) for d in detect_page(detector, doc[pno])]
+            hits = ocr_page_text(text_backend, doc[pno], avoid)
+            with lk:
+                keep = [f for f in fs.formulas
+                        if not (f.page == pno and f.kind == "text" and f.source == "ppocr" and not f.edited and f.status == "pending")]
+                fs.formulas[:] = keep
+                n = 0
+                for d in hits:
+                    if any(g.page == pno and g.kind == "text" and coords.iou(g.rect, d["rect"]) > 0.5 for g in fs.formulas):
+                        continue  # 修正・確定した文章の枠と重なるものは、足さない
+                    n += 1
+                    fid = f"text_p{pno}_{n}"
+                    while any(g.id == fid for g in fs.formulas):
+                        n += 1
+                        fid = f"text_p{pno}_{n}"
+                    fs.formulas.append(Formula(id=fid, page=pno, rect=tuple(d["rect"]), latex=d["text"], ocr_latex=d["text"],
+                                               source="ppocr", kind="text", confidence=d["score"], status="pending"))
+                    lines += 1
+                if pno not in fs.meta.setdefault("text_pages", []):
+                    fs.meta["text_pages"].append(pno)
+                fs.meta["text_ocr"] = {"engine": getattr(text_backend, "version", "ppocr")}
+                log("text", page=pno, added=n)
+                save()
+        return {"state": "done", "lines": lines}
+    finally:
+        doc.close()

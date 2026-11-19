@@ -53,6 +53,8 @@ class ViewerSession:
         self._stop = threading.Event()
         self._auto_thread: threading.Thread | None = None
         self.auto: dict = {"state": "idle"}
+        self.text_state: dict = {"state": "idle"}  # 文章（日本語など）の認識
+        self._text_thread: threading.Thread | None = None
         self._disk_mtime = 0.0
         self.version = 0  # 式の集合が変わるたびに増やす（画面の再読み込み判定）
         if self.formulas_path.exists():
@@ -205,6 +207,8 @@ class ViewerSession:
         self._check_writable()
         with self.lock:  # 文書への描画だけを排他し、認識中も画面の操作を止めない
             f = self._get(fid)
+            if f.kind == "text":
+                raise SessionError("文章の枠は、数式として再認識しない（このページの文章を認識、で読み直す）", 409)
             png = crop_png(self._page(f.page), f.rect, dpi=200)
         try:
             res = recognize_png(self.backend, png, dpi=200, verifier=self._verifier)
@@ -238,10 +242,49 @@ class ViewerSession:
         if pid or self.auto.get("state") != "running":
             self.refresh_from_disk()
         with self.lock:
-            st = dict(self.auto, version=self.version)
+            st = dict(self.auto, version=self.version, text=dict(self.text_state))
         if pid:
             st.update(state="preparing", phase="prepare", pid=pid)
         return st
+
+    def start_text(self, pages=None, force: bool = False, backend=None) -> dict:
+        """文章（日本語など）を、PaddleOCR で行ごとに読む。pages は 0 始まり（省略で全ページ）。数式の枠は読まない。"""
+        if pages is not None:
+            if not isinstance(pages, list) or not pages or any(
+                    not isinstance(p, int) or isinstance(p, bool) or not (0 <= p < self.doc.page_count) for p in pages):
+                raise SessionError("pages が不正（ページ番号は 0 から始まる整数のリスト）")
+        if self.preparing():
+            raise SessionError("事前処理中のため、終わってから文章を認識する", 409)
+        self._check_writable()
+        with self.lock:
+            if self.text_state.get("state") == "running":
+                return dict(self.text_state)
+            self.text_state = {"state": "running", "page": 0, "pages": len(pages) if pages else self.doc.page_count,
+                               "lines": 0, "error": None}
+        t = threading.Thread(target=self._text_run, args=(pages, force, backend), daemon=True)
+        self._text_thread = t
+        t.start()
+        return dict(self.text_state)
+
+    def _text_run(self, pages, force, backend):
+        from ..prepare import process_text
+        from ..recognize.textocr import shared_backend
+
+        def save():
+            self._save()
+            self.version += 1
+
+        def progress(**k):
+            self.text_state.update({kk: v for kk, v in k.items() if kk != "phase"})
+
+        try:
+            r = process_text(self.input, self.fs, text_backend=backend or shared_backend(), lock=self.lock, save=save,
+                             progress=progress, log=self._log, should_stop=self._stop.is_set, only_pages=pages, force=force, detector=self._detector)
+            with self.lock:
+                self.text_state.update(state="done" if r["state"] == "done" else "idle", lines=r["lines"])
+        except Exception as e:  # 失敗は画面に出し、途中までの結果は残す
+            with self.lock:
+                self.text_state.update(state="error", error=f"{type(e).__name__}: {e}")
 
     def start_auto(self, detector=None, pages=None, force: bool = False) -> dict:
         """全ページ（既定）または pages（0 始まり）だけを、検出・認識する。force は処理済みのページも検出し直す。"""
@@ -358,9 +401,9 @@ class ViewerSession:
 
     def close(self):
         self._stop.set()  # 裏の自動認識を、区切りのよいところで止める
-        t = self._auto_thread
-        if t is not None and t.is_alive() and t is not threading.current_thread():
-            t.join(timeout=20)
+        for t in (self._auto_thread, self._text_thread):
+            if t is not None and t.is_alive() and t is not threading.current_thread():
+                t.join(timeout=20)
         self.doc.close()
 
 
