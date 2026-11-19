@@ -12,9 +12,10 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 記憶できなくても動く */ } },
 };
 const reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+const ZOOM_MIN = 0.5, ZOOM_MAX = 5;
 const state = {
   doc: null, docId: null, formulas: [], selected: null, redrawFor: null,
-  fit: LS.get("plo-fit", "page") === "width" ? "width" : "page", cur: 0,
+  fit: LS.get("plo-fit", "page") === "width" ? "width" : "page", cur: 0, zoom: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, parseFloat(LS.get("plo-zoom", "1")) || 1)),
 };
 
 async function api(method, path, body) {
@@ -86,7 +87,7 @@ function buildDeck() {
 }
 
 function applyFit() {
-  pagesEl.className = state.fit === "width" ? "fit-width" : "fit-page";
+  pagesEl.className = (state.fit === "width" ? "fit-width" : "fit-page") + (zoomed() ? " zoomed" : "");
   document.querySelectorAll("[data-fit]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.fit === state.fit)));
   layoutDeck();
 }
@@ -103,10 +104,10 @@ function layoutDeck() {
     const p = state.doc.pages[i];
     let s = W / p.width;
     if (fitPage) s = Math.min(s, H / p.height);
-    s = Math.max(s, 0.05);
+    s = Math.max(s * state.zoom, 0.05);
     const page = slot.firstChild;
     page.style.width = `${p.width * s}px`; page.style.height = `${p.height * s}px`;
-    slot.style.height = fitPage ? `${pagesEl.clientHeight}px` : "";
+    slot.style.height = fitPage ? `${Math.max(pagesEl.clientHeight, zoomed() ? p.height * s + 92 : 0)}px` : "";
     slot.dataset.scale = String(s);
   });
   pagesEl.scrollTo({ top: slots[Math.min(keep, slots.length - 1)].offsetTop, behavior: "auto" });
@@ -119,7 +120,7 @@ function layoutDeck() {
 async function ensureImage(slot) {
   slot.dataset.seen = "1";
   const i = +slot.dataset.page, s = +slot.dataset.scale || 1;
-  const dpi = Math.min(240, Math.max(72, Math.ceil((s * (window.devicePixelRatio || 1) * 72) / 24) * 24));
+  const dpi = Math.min(300, Math.max(72, Math.ceil((s * (window.devicePixelRatio || 1) * 72) / 24) * 24));
   const img = slot.querySelector("img");
   if (+img.dataset.dpi >= dpi) return;
   img.dataset.dpi = String(dpi);
@@ -179,6 +180,33 @@ for (const id of ["prev", "prev2"]) $(id).addEventListener("click", () => goto(s
 for (const id of ["next", "next2"]) $(id).addEventListener("click", () => goto(state.cur + 1));
 $("pageslider").addEventListener("input", (ev) => goto(+ev.target.value - 1, false));
 document.querySelectorAll("[data-fit]").forEach((b) => b.addEventListener("click", () => setFit(b.dataset.fit)));
+// ---- 拡大・縮小（1 = 「全体」「幅」の大きさ。Ctrl/⌘＋ホイール・ピンチ・＋/−/0 キーでも）
+function zoomed() { return Math.abs(state.zoom - 1) > 0.001 && state.zoom > 1; }
+function setZoom(z) {
+  z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 1000) / 1000));
+  if (Math.abs(z - 1) < 0.02) z = 1;
+  if (z === state.zoom) return;
+  const sl = slots[state.cur];
+  const fy = sl ? (pagesEl.scrollTop - sl.offsetTop) / Math.max(1, sl.offsetHeight) : 0;
+  const fx = pagesEl.scrollLeft / Math.max(1, pagesEl.scrollWidth - pagesEl.clientWidth);
+  state.zoom = z; LS.set("plo-zoom", String(z));
+  $("zoom-label").textContent = `${Math.round(z * 100)}%`;
+  if (!state.doc) return;
+  pagesEl.className = (state.fit === "width" ? "fit-width" : "fit-page") + (zoomed() ? " zoomed" : "");
+  layoutDeck();
+  const nl = slots[state.cur];
+  if (nl) pagesEl.scrollTo({ top: nl.offsetTop + fy * nl.offsetHeight, left: fx * Math.max(0, pagesEl.scrollWidth - pagesEl.clientWidth), behavior: "auto" });
+}
+$("zoom-label").textContent = `${Math.round(state.zoom * 100)}%`;
+$("zoom-in").addEventListener("click", () => setZoom(state.zoom * 1.25));
+$("zoom-out").addEventListener("click", () => setZoom(state.zoom / 1.25));
+$("zoom-label").addEventListener("click", () => setZoom(1));
+pagesEl.addEventListener("wheel", (ev) => {
+  if (!(ev.ctrlKey || ev.metaKey)) return;  // 普通のスクロールは、そのまま
+  ev.preventDefault();
+  setZoom(state.zoom * Math.exp(-ev.deltaY * 0.01));
+}, { passive: false });
+
 function setFit(v) { state.fit = v === "width" ? "width" : "page"; LS.set("plo-fit", state.fit); if (state.doc) applyFit(); }
 
 // ============================================================ 式の枠
@@ -933,6 +961,9 @@ function wire() {
     const f = state.formulas.find((x) => x.id === state.selected);
     if (f && f.alt_latex) act(() => api("POST", `/api/formulas/${encodeURIComponent(f.id)}`, { latex: f.alt_latex }), T("もう一方の読み取りを採用しました"));
   };
+  const renameTitle = () => { if (state.docId) actRename(state.docId); };
+  $("docname").addEventListener("click", renameTitle);
+  $("docname").addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === "F2") { ev.preventDefault(); renameTitle(); } });
   $("doc-menu").onclick = () => menuAt($("doc-menu"), state.docId ? menuItemsFor(state.docId) : []);
   $("tree-newfolder").onclick = () => actNewFolder(defaultFolderKey());
   $("tree-select").onclick = () => setSelectMode(!tree.selectMode);
@@ -961,7 +992,7 @@ function wire() {
     const t = ev.target;
     if (t.closest && t.closest("input, textarea, select, [contenteditable], .menu, dialog")) return;
     if (t.closest && t.closest("#tree") && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(ev.key)) return;
-    const fitPage = state.fit === "page";
+    const fitPage = state.fit === "page" && !zoomed();
     let handled = true;
     switch (ev.key) {
       case "ArrowRight": case "PageDown": case "j": goto(state.cur + 1); break;
@@ -971,6 +1002,9 @@ function wire() {
       case "ArrowUp": if (fitPage) goto(state.cur - 1); else handled = false; break;
       case "Home": goto(0); break;
       case "End": goto(slots.length - 1); break;
+      case "+": case "=": setZoom(state.zoom * 1.25); break;
+      case "-": case "_": setZoom(state.zoom / 1.25); break;
+      case "0": setZoom(1); break;
       case "f": setFit(state.fit === "page" ? "width" : "page"); toast(state.fit === "page" ? T("表示: ページ全体") : T("表示: 幅に合わせる"), 1100); break;
       case "b": setSidebar(!$("layout").classList.contains("sb-open"), true); break;
       case "/": $("tree-filter").focus(); $("tree-filter").select(); break;

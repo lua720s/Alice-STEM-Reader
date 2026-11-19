@@ -124,7 +124,12 @@ main { display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns:
 #deck { position: relative; isolation: isolate; background: var(--deck); min-width: 0; min-height: 0; }
 #pages { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; scroll-snap-type: y mandatory; overscroll-behavior: contain; outline: none; }
 #pages.fit-width { scroll-snap-type: y proximity; }
-.slot { scroll-snap-align: start; scroll-snap-stop: always; display: flex; align-items: center; justify-content: center; padding: 20px 24px 72px; }
+.slot { scroll-snap-align: start; scroll-snap-stop: always; display: flex; align-items: center; justify-content: center; padding: 20px 24px 72px; min-width: max-content; box-sizing: border-box; }
+#pages.zoomed { scroll-snap-type: y proximity; overflow-x: auto; }
+.zoomed .slot { scroll-snap-stop: normal; }
+#topbar .title strong#docname { cursor: text; border-radius: 5px; padding: 1px 4px; margin: -1px -4px; }
+#topbar .title strong#docname:hover, #topbar .title strong#docname:focus-visible { background: var(--hover, rgba(127,127,127,.15)); outline: none; }
+#zoom-label { min-width: 48px; font-variant-numeric: tabular-nums; }
 .fit-width .slot { scroll-snap-stop: normal; }
 .page { position: relative; isolation: isolate; flex: none; background: #fff; box-shadow: var(--page-shadow); border-radius: 2px; user-select: none; cursor: crosshair; }
 .page img { display: block; width: 100%; height: 100%; pointer-events: none; }
