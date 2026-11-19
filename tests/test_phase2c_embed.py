@@ -96,3 +96,45 @@ def test_layer_text_normalization():
     assert embed.normalize_for_layer("a\n+\tb") == "a + b"
     assert embed.is_winansi_ascii(r"\frac{a}{b}")
     assert not embed.is_winansi_ascii("\\text{面積}")
+
+
+def _blank_scan(tmp_path):
+    """文字層のない1ページ（画像のみ）。"""
+    doc = pymupdf.open()
+    page = doc.new_page(width=412, height=594)
+    pix = pymupdf.Pixmap(pymupdf.csGRAY, pymupdf.IRect(0, 0, 50, 50), False)
+    pix.clear_with(230)
+    page.insert_image(page.rect, pixmap=pix)
+    p = tmp_path / "blank.pdf"
+    doc.save(p)
+    return p
+
+
+@pytest.mark.parametrize("mode", ["invisible", "actualtext"])
+def test_long_latex_in_narrow_box_keeps_repeated_chars(tmp_path, mode):
+    """実教材で発生: 長い LaTeX を狭い矩形に詰めると MuPDF が '}}' の片方を捨てた（2026-11-19）。"""
+    from pdf_latex_overlay.models import Formula
+    src = _blank_scan(tmp_path)
+    latex = r"\int_{4}^{16}\frac{\sqrt{x}}{2}e^{\frac{\sqrt{x}}{2}}dx"
+    f = Formula(id="q5", page=0, rect=(282, 534, 341, 568), latex=latex)
+    out = tmp_path / "o.pdf"
+    embed.embed_formulas(src, out, [f], mode=mode)
+    assert copycheck.mupdf_extract(out, [f])["q5"] == latex
+    assert pdfcheck.compare_appearance(src, out).identical
+
+
+@pytest.mark.pdfkit
+@pytest.mark.skipif(not copycheck.pdfkit_available(), reason="swift/PDFKit なし")
+def test_vertically_adjacent_formulas_select_separately(tmp_path):
+    """実教材で発生: 背の高い式の直下・右の式が PDFKit で同じ行にまとめられ、矩形選択が空になった。"""
+    from pdf_latex_overlay.models import Formula
+    src = _blank_scan(tmp_path)
+    fs = [
+        Formula(id="a2", page=0, rect=(86, 411, 153, 447), latex=r"=\int_{2}^{4}te^{-t}\cdot2tdt"),
+        Formula(id="a3", page=0, rect=(309, 446, 374, 463), latex=r"\int e^{-t}dt=-e^{-t}+C"),
+        Formula(id="a4", page=0, rect=(86, 542, 212, 569), latex=r"=-52e^{-4}+20e^{-2}=\frac{-52+20e^{2}}{e^{4}}"),
+    ]
+    out = tmp_path / "o.pdf"
+    embed.embed_formulas(src, out, fs)
+    for r in copycheck.copy_table(out, fs):
+        assert r["pdfkit_exact"] and r["pdfkit_page_count"] == 1, r

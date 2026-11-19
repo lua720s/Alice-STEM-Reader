@@ -44,14 +44,28 @@ class Placement:
     text: str
 
 
+# 字形の高さ（Helvetica の ascent 0.718 + descent 0.207）を矩形高さのこの割合に収め、上下に余白を残す。
+# 縦に近い式どうし（例: 積分の上下端で背の高い式の直下の式）が PDFKit で同じ行にまとめられ、
+# 矩形選択が空になるのを防ぐ（実教材で確認、2026-11-19）。
+BAND = 0.65
+# 横方向の最小倍率。長い LaTeX を狭い矩形に詰めると、隣り合う同じ文字（例: "}}"）がほぼ重なり、
+# MuPDF が重複字形として片方を捨てる。足りないときは文字を小さくして倍率を保つ。
+MIN_HSCALE = 0.35
+_ASC, _DESC = 0.718, 0.207
+
+
 def placement(page: pymupdf.Page, rect, text: str) -> Placement:
     """保存座標の矩形に、見た目上で横書きに収まる文字行列を作る（フォントサイズ 1 基準）。"""
     to_user = ~page.transformation_matrix  # 保存座標 → PDF ユーザー空間
     derot = page.derotation_matrix  # 描画座標 → 保存座標
     vis = pymupdf.Rect(rect) * page.rotation_matrix  # 見た目上の矩形
-    h = vis.height
-    fs = h  # 文字の高さ ≒ 矩形の高さ
-    base_y = vis.y1 - 0.2 * h  # Helvetica の descender 分だけ上げる
+    natural = _helv().text_length(text, fontsize=1.0)
+    fs = vis.height * BAND / (_ASC + _DESC)
+    if natural > 0:
+        fs = min(fs, vis.width / (natural * MIN_HSCALE))
+    hs = vis.width / (natural * fs) if natural > 0 else 1.0
+    cy = (vis.y0 + vis.y1) / 2
+    base_y = cy + fs * (_ASC - _DESC) / 2  # 字形の帯を矩形の上下中央に置く
 
     def user(x, y):
         return pymupdf.Point(x, y) * derot * to_user
@@ -59,9 +73,7 @@ def placement(page: pymupdf.Page, rect, text: str) -> Placement:
     o = user(vis.x0, base_y)
     ex = user(vis.x0 + 1, base_y) - o  # 見た目の右方向（単位長）
     ey = user(vis.x0, base_y - 1) - o  # 見た目の上方向（単位長）
-    natural = _helv().text_length(text, fontsize=1.0)
-    hs = vis.width / natural if natural > 0 else 1.0
-    tm = (ex.x * hs, ex.y * hs, ey.x * fs, ey.y * fs, o.x, o.y)
+    tm = (ex.x * hs * fs, ex.y * hs * fs, ey.x * fs, ey.y * fs, o.x, o.y)
     return Placement(tuple(round(v, 4) for v in tm), text)
 
 
