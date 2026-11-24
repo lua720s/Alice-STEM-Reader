@@ -46,6 +46,10 @@ on open theItems
 end open
 
 on startViewer(args)
+	-- Alice がインストールされている端末では、常駐キャラクターも起動する。
+	try
+		do shell script "/usr/bin/pgrep -x -u $(/usr/bin/id -u) alice-app >/dev/null || /usr/bin/open -gj -b com.harukaze.alice --args --archive-background"
+	end try
 	try
 		do shell script (my buildCmd("app-open") & args & " 2>&1")
 	on error errMsg
