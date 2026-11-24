@@ -50,7 +50,7 @@ on startViewer(args)
 		do shell script (my buildCmd("app-open") & args & " 2>&1")
 	on error errMsg
 		-- 失敗の理由（例: 同じ PDF が別のビューアで開かれている）を、ダイアログで知らせる
-		display alert "PDF LaTeX Overlay" message errMsg as warning
+		display alert "Alice STEM PDF Reader" message errMsg as warning
 	end try
 end startViewer
 '''

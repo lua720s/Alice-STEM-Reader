@@ -1,4 +1,4 @@
-// PDF LaTeX Overlay ローカルビューア。
+// Alice STEM PDF Reader ローカルビューア。
 // OCR 結果やファイル名はデータとして扱う: textContent / textarea にだけ入れ、HTML として解釈しない（アイコンは固定の文字列のみ）。
 "use strict";
 
@@ -1090,8 +1090,8 @@ async function loadDoc(knownEmpty = false) {
   showDetail(null);
   $("deck").classList.toggle("empty", !doc);
   $("emptydeck").hidden = !!doc;
-  $("docname").textContent = doc ? doc.name : "PDF LaTeX Overlay";
-  document.title = doc ? `${doc.name} – PDF LaTeX Overlay` : "PDF LaTeX Overlay";
+  $("docname").textContent = doc ? doc.name : "Alice STEM PDF Reader";
+  document.title = doc ? `${doc.name} – Alice STEM PDF Reader` : "Alice STEM PDF Reader";
   $("stats").textContent = "";
   $("autostat").textContent = "";
   $("autorun").disabled = !doc || !doc.backend || doc.backend === "none";

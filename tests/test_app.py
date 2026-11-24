@@ -135,7 +135,7 @@ def test_build_app_has_open_with_pdf_and_is_signed(tmp_path):
     from pdf_latex_overlay.appbuild import BUNDLE_ID, build_app
 
     app = build_app(tmp_path, python="/path with space/python", register=False)
-    assert app.name == "PDF LaTeX Overlay.app"
+    assert app.name == "Alice STEM PDF Reader.app"
     info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
     assert info["CFBundleIdentifier"] == BUNDLE_ID
     types = {t["LSItemContentTypes"][0]: t for t in info["CFBundleDocumentTypes"]}

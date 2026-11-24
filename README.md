@@ -1,4 +1,4 @@
-# PDF LaTeX Overlay
+# Alice STEM PDF Reader
 
 PDF上で数式を選択し、編集可能な LaTeX としてコピーできる派生PDFを生成する独立プロジェクト。元PDFは読み取り専用とし、ページの見た目を維持する。
 
@@ -91,13 +91,13 @@ cd このフォルダ && .venv/bin/python -m pdf_latex_overlay viewer 教材フ�
 ### macOS アプリ（.app）と、Finder の「このアプリケーションで開く」
 
 ```bash
-.venv/bin/python -m pdf_latex_overlay build-app        # ~/Applications/PDF LaTeX Overlay.app を作る（--dest で場所を変更）
+.venv/bin/python -m pdf_latex_overlay build-app        # ~/Applications/Alice STEM PDF Reader.app を作る（--dest で場所を変更）
 ```
 
-- Finder で PDF を右クリック →「このアプリケーションで開く」→「PDF LaTeX Overlay」。複数のPDFを選んでも、ひとつのビューアに加えて開く。
+- Finder で PDF を右クリック →「このアプリケーションで開く」→「Alice STEM PDF Reader」。複数のPDFを選んでも、ひとつのビューアに加えて開く。
 - PDF やフォルダを、アプリのアイコンにドロップしても開く。アイコンをダブルクリックすると、**選択画面は出さず**、ビューアが開く。開くものは、ビューアの中の「**＋（PDFまたはフォルダを開く）**」から選ぶ（Finder の選択画面が出る）。追加したフォルダは覚えていて、次の起動でも並ぶ。
 - 既定のPDFアプリ（プレビューなど）は**奪わない**（「別のアプリで開く」の候補に加わるだけ）。常に使いたいときは、Finder の「情報を見る」→「このアプリケーションで開く」で選ぶ。
-- ビューアは1つだけ常駐し、画面（ブラウザ）からの通信が120分なければ自動で終了する。すぐ止めるには `.venv/bin/python -m pdf_latex_overlay app-stop`。ログは `~/Library/Logs/PDF LaTeX Overlay.log`。
+- ビューアは1つだけ常駐し、画面（ブラウザ）からの通信が120分なければ自動で終了する。すぐ止めるには `.venv/bin/python -m pdf_latex_overlay app-stop`。ログは `~/Library/Logs/Alice STEM PDF Reader.log`。
 - 同じ中身のPDFは、別のビューアで開いていると開けない（理由をダイアログで知らせる）。
 - アプリは薄い起動部分だけで、プログラムと仮想環境は、**このプロジェクトのもの**を使う（場所を埋め込むので、プロジェクトを動かしたら `build-app` を作り直す）。署名は自分用（ad-hoc）で、配布用ではない。
 
@@ -125,4 +125,4 @@ cd このフォルダ && .venv/bin/python -m pdf_latex_overlay viewer 教材フ�
 
 ### macOS アプリ: 初回の許可
 
-`build-app` で作り直すたびに、アプリの署名が変わるため、macOS が「PDF LaTeX Overlay がフォルダ（書類など）にアクセスしようとしています」と**許可を求めることがある**。許可しないと、アプリを開いても何も起きない（許可の画面が出たままになる）。一度許可すれば、次からは出ない（作り直すと、また出ることがある）。
+`build-app` で作り直すたびに、アプリの署名が変わるため、macOS が「Alice STEM PDF Reader がフォルダ（書類など）にアクセスしようとしています」と**許可を求めることがある**。許可しないと、アプリを開いても何も起きない（許可の画面が出たままになる）。一度許可すれば、次からは出ない（作り直すと、また出ることがある）。

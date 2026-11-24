@@ -17,12 +17,12 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-APP_NAME = "PDF LaTeX Overlay"
+APP_NAME = "Alice STEM PDF Reader"
 IDLE_EXIT_MIN = 120
 
 
 def support_dir() -> Path:
-    return Path(os.environ.get("PLO_APP_DIR") or Path.home() / "Library" / "Application Support" / APP_NAME)
+    return Path(os.environ.get("PLO_APP_DIR") or Path.home() / "Library" / "Application Support" / "PDF LaTeX Overlay")
 
 
 def state_path() -> Path:
