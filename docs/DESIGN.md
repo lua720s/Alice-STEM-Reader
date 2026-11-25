@@ -2,7 +2,7 @@
 
 ## 独立モジュールとインターフェース
 
-Pythonパッケージ `pdf_latex_overlay` とCLIを用意する。公開入口の候補は `process_pdf(input_path, output_path, options) -> RunReport`。CLIは公開入口を呼び、AliceArchiveは将来アダプターから同じ入口を呼ぶ。AliceやAliceArchiveへの依存はプロジェクト側に持たせない。
+Pythonパッケージ `pdf_latex_overlay` とCLIを用意する。公開入口の候補は `process_pdf(input_path, output_path, options) -> RunReport`。CLIは公開入口を呼ぶ。ほかのアプリから組み込むときも、アダプター（`examples/embed_adapter.py`）から同じ入口を呼ぶ。特定のアプリへの依存は、このプロジェクトに持たせない。
 
 - `backends/mathpix` はアップロードから取得までを管理。ローカル経路と分け、外部送信は明示選択。
 - `detect` はレンダリングしたページから数式領域を検出。UniMERNet公式のPDF-Extract-Kit MFD例を起点にし、手動矩形と固定検出結果でも後段を試せるようにする。[UniMERNet公式リポジトリ](https://github.com/opendatalab/UniMERNet)
@@ -19,7 +19,7 @@ Pythonパッケージ `pdf_latex_overlay` とCLIを用意する。公開入口�
 | 不可視テキスト | 元ページに文字描画モード3を追加。領域に合うベースラインと幅を設定し、フォントのUnicode抽出と戻り値を確認。 | 長い式で選択がずれないか、既存テキストと二重になるか。 |
 | ActualText | 数式単位のSpan marked contentに `/ActualText` を設定し、選択可能な不可視テキストを内包する。ライブラリのPDF文字列エンコーダを使う。比較フィクスチャではASCIIの代替文字とLaTeXを変え、置換の採用を判別する。 | ビューアが置換文字を返すか、代替文字が漏れないか、抽出順や既存タグが壊れないか。 |
 
-描画と埋め込みの候補はPyMuPDF、低レベルのコンテンツ編集はpikepdfを候補とする。AliceArchiveに配布・統合する前に依存とモデルのライセンスを確認する。既存文字層と競合する式は、周辺本文への影響を評価できるまで明示的に除外し、同じ式を無条件に追記しない。既存ページのラスタライズは検出用に限る。既存ページの内容を置換する方式は個別の構造保持テストを通してから対象に加える。既定方式はコピーと外観の実測で選ぶ。
+描画と埋め込みの候補はPyMuPDF、低レベルのコンテンツ編集はpikepdfを候補とする。配布する前に、依存とモデルのライセンスを確認する。既存文字層と競合する式は、周辺本文への影響を評価できるまで明示的に除外し、同じ式を無条件に追記しない。既存ページのラスタライズは検出用に限る。既存ページの内容を置換する方式は個別の構造保持テストを通してから対象に加える。既定方式はコピーと外観の実測で選ぶ。
 
 [PyMuPDF Shape](https://pymupdf.readthedocs.io/en/latest/shape.html) · [PDF AssociationのActualText技法](https://pdfa.org/techniques-for-accessible-pdf/actualtext-provides-correct-extractable-characters-in-place-of-ocr-errors/UA1_Tpdf-G2_06/)
 
@@ -57,9 +57,11 @@ macOS 27.0.1、PyMuPDF 2.1（MuPDF 1.28.6）、pikepdf 10.18.2。ベクター・
 - PDFの状態は、中身のハッシュで引くライブラリ（`prepare` と共通）から読む。ハッシュは裏のスレッドで計算し、(サイズ, 更新時刻)が同じなら再計算しない（`library/.hashcache.json`）。
 - 画面は、左のコレクション・中央のページ・右の詳細の3列。テーマは `data-theme`（system / light / dark）で切り替え、`theme.js` が描画前に決める（CSPでインラインのスクリプトを許さないため、別ファイル）。
 
+**データの置き場所（2026-11-19）**
 
-1. **コレクションは、実際のフォルダそのもの（コピーしない）。** `viewer` にフォルダを渡すと、そのフォルダの階層をそのまま読んで並べる。PDFは元の場所に置いたまま、アプリの中へ取り込まない。ObsidianのVault（フォルダがそのままVault）と同じ考え方。名前の変更・移動・削除・フォルダ作成は、実際のフォルダに対して行う（削除はゴミ箱へ）。
-2. **アプリ用のデータは、別の場所にまとめる。** 認識の結果（式の枠・LaTeX・履歴・書き出したPDF）は、`library/<PDFの中身のハッシュ16桁>/` に置く（環境変数 `PLO_LIBRARY` で変更、Git管理外）。PDFを動かしても、中身が同じなら同じ結果を使う。**教材フォルダの中に、このアプリ用のファイルやフォルダは作らない。**
+1. **コレクションは、実際のフォルダそのもの（コピーしない）。** `viewer` にフォルダを渡すと、そのフォルダの階層をそのまま読んで並べる。資料は元の場所に置いたまま、アプリの中へ取り込まない。ObsidianのVault（フォルダがそのままVault）と同じ考え方。名前の変更・移動・削除・フォルダ作成は、実際のフォルダに対して行う（削除はゴミ箱へ）。
+2. **アプリ用のデータは、別の場所にまとめる。** 認識の結果（式の枠・LaTeX・履歴・書き出したPDF）は、`library/<PDFの中身のハッシュ16桁>/` に置く（環境変数 `PLO_LIBRARY` で変更、Git管理外）。PDFを動かしても、中身が同じなら同じ結果を使う。**資料のフォルダの中に、このアプリ用のファイルやフォルダは作らない。**
+3. **PDF 以外の資料**（EPUB・DjVu・画像・Markdown・LaTeX など）は、`library/_converted/` に変換した PDF を置き（元のファイルの中身のハッシュで引く）、変換の記録（道具・版・日時）を同じ名前の `.json` に残す。Snip の履歴は `library/_snips/`。
 
 **「Failed to fetch」の原因（2026-11-19、調査結果）**: ブラウザが、ビューアに届かなかったときの表示。(1) ビューアの終了、(2) 起動し直しによる接続先（ポート・トークン）の変更、(3) サーバー側の想定外の例外による接続切断、の3つを確認した。(3) は、ページの外にある式の枠の切り出しで再現し、修正した（400を返す。想定外の例外も、500のJSONで返す）。(1)(2) は、画面の上に案内と「再接続」ボタンを出し、つながり直したら自動で消す。
 
@@ -102,3 +104,17 @@ macOS 27.0.1、PyMuPDF 2.1（MuPDF 1.28.6）、pikepdf 10.18.2。ベクター・
 - **区切り**: 内部のデータは変えず、コピー（`outText`）と、保存時の文章の枠（`export(delim=…)`、`delims.convert_delims`）で変換する。規則は `delims.py` と `app.js` で同じ（`\( \)`→`$ $`、`\[ \]`→`$$ $$`、なし）。
 - **起動時の選択画面をなくした**: `.app` の `on run` は、何も渡さずに `app-open` を呼ぶだけ。ビューアは、開くものがなくても起動できる（`Hub([])`）。開くものは、ビューアの中の「＋」から選ぶ: `POST /api/pick`（`kind`: pdf / folder）が、サーバー側で `osascript` の `choose file` / `choose folder` を出し、選んだものを加える。固定の文面だけを実行し、利用者の入力は渡さない。macOS 以外では 501。
 - **フォルダの記憶**: 画面から加えたフォルダを `roots.json`（`~/Library/Application Support/PDF LaTeX Overlay/`）に保存し、次の起動で並べる（`--roots-file`）。`POST /api/addroot` で、動いているビューアにも足せる。
+
+
+## PDF 以外の資料と Snip（v0.2、2026-11-25）
+
+- `docformats.py`: 資料を PDF に変換する層。ビューア・`prepare`・`convert` は、この層を通して、すべての形式を PDF として扱う（認識・書き出し・派生PDFの仕組みを共通にする）。
+  - EPUB・MOBI・FB2・XPS・CBZ・SVG: MuPDF でレイアウト（A5、11pt）して PDF に。文字層あり。
+  - 画像: EXIF の向きを補正し、1 枚 1 ページ。複数ページの TIFF も可。HEIC は pillow-heif、なければ macOS の `sips`。
+  - DjVu: DjVuLibre の `ddjvu -format=pdf`。なければ、導入方法を示して止まる。
+  - Markdown・テキスト: 原文を組版（数式は原文のまま。Markdown の記号として解釈しない）。範囲の Snip では、OCR を使わずに文字層の原文を返す。
+  - LaTeX: `uplatex+dvipdfmx`（日本語の文書クラス）・`tectonic`・`lualatex`・`xelatex`・`pdflatex` の順にコンパイル（`-no-shell-escape`、書き込みは出力先だけ）。できなければ原文を組版し、理由を記録する。
+- `snip.py`: 画像（画面の切り取り・貼り付け・ドロップ・ファイル）または資料の範囲を読む。auto は「文章＋行内数式」（数式検出 → 混在の認識）→ 数式 → 文章の順に試す。結果・画像・出所（資料名・ページ・範囲・ハッシュ）・エンジンと版を `library/_snips/` に残し、Markdown・LaTeX・TSV・JSON に書き出す。
+- 画面の切り取りは macOS の `screencapture -i`（ビューアのサーバーが実行し、結果は `pbcopy` でクリップボードへ）。初回は「画面収録」の許可が要る。
+- 画面（ブラウザ）は外部に通信しない（CSP で `'self'` のみ。KaTeX も同梱）。
+- 起動時のフック: アプリは、`~/Library/Application Support/Alice STEM Reader/hooks/on-launch`（自分が持ち主で、他人が書き換えられない実行ファイル）があれば、起動のたびに裏で実行する。ほかのアプリとの連携は、このプロジェクトに入れず、各自のフックで行う。

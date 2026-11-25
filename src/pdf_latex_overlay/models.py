@@ -1,7 +1,7 @@
 """共通データ構造。
 
-座標は DESIGN.md に従い、回転前の CropBox 左上原点、単位 pt（PyMuPDF のページ座標と同じ）。
-ページ番号は 0 始まり。ビューア・CLI・AliceArchive アダプターはこの JSON を共有する。
+座標は docs/DESIGN.md に従い、回転前の CropBox 左上原点、単位 pt（PyMuPDF のページ座標と同じ）。
+ページ番号は 0 始まり。ビューア・CLI・ほかのアプリのアダプターは、この JSON を共有する。
 """
 
 from __future__ import annotations

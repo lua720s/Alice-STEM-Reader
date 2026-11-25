@@ -1,7 +1,7 @@
 """公開入口 `process_pdf`: 式の選別 → 埋め込み → 検証 → 公開。
 
 検証に一つでも失敗したら派生PDFを公開せず、終了コードと失敗箇所をレポートに残す。
-AliceArchive などの呼び出し側は、この関数と RunReport の JSON だけに依存する。
+ほかのアプリなどの呼び出し側は、この関数と RunReport の JSON だけに依存する。
 """
 
 from __future__ import annotations

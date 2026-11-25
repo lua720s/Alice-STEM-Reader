@@ -1,7 +1,7 @@
-"""AliceArchive から呼び出す例（Alice 側のコードではなく、呼び出し方の見本）。
+"""ほかのアプリ（文献管理・学習用アプリ・デジタルアーカイブなど）から呼び出す例。
 
-AliceArchive は元資料を原本として保持し、派生PDFは再生成できる派生アセットとして扱う
-（Alice/docs/products/ALICE_ARCHIVE.md 9章）。このプロジェクトは Alice に依存しない。
+元の資料は原本として保持し、派生PDF（数式をLaTeXとしてコピーできるPDF）は、いつでも作り直せる派生物として扱う。
+呼び出し側は `process_pdf` と、その結果（RunReport の JSON）だけに依存すればよい。
 """
 
 from pathlib import Path

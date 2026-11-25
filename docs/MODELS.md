@@ -7,7 +7,7 @@
 | 配布元 | [opendatalab/UniMERNet](https://github.com/opendatalab/UniMERNet)、重みは Hugging Face `wanderkid/unimernet_tiny` |
 | 版 | パッケージ `unimernet==0.2.3`、重みのリビジョン `3f09ac4b1cd583be47ea20a7d7daef839473028a` |
 | 重み | `unimernet_tiny.pth`（430,075,701 バイト、SHA-256 `6f7608624e2d7549c7f0f05fcfbe073ae521328cf70f1d46374d96f9881d7371`、配布元のLFSハッシュと一致） |
-| ライセンス | パッケージ・重みとも Apache-2.0（PyPI と Hugging Face の表示）。AliceArchiveへ配布する前に再確認する |
+| ライセンス | パッケージ・重みとも Apache-2.0（PyPI と Hugging Face の表示）。配布する前に再確認する |
 | 置き場所 | `models/unimernet_tiny/`、`.venv-ml/`（いずれもGit管理外） |
 
 8GB RAMのM1で動かすため、tiny（small 810MB、base はさらに大きい）を選んだ。依存が `transformers==4.42.4` などを固定するので、本体とは別の venv に入れ、子プロセス（`recognize/unimernet_worker.py`、JSON Lines）で呼ぶ。
@@ -129,7 +129,7 @@ shasum -a 256 models/unimernet_tiny/unimernet_tiny.pth   # 上表の値と一致
 | 配布元 | [PDF-Extract-Kit](https://github.com/opendatalab/PDF-Extract-Kit)（UniMERNet公式が勧める検出器）。重みは Hugging Face `opendatalab/PDF-Extract-Kit-1.0` の `models/MFD/YOLO/yolo_v8_ft.pt` |
 | 版 | リビジョン `ed6b654c018d742e65a17671e379c5e6ecc87ec9`、`ultralytics==8.4.215` |
 | 重み | 349,867,002 バイト、SHA-256 `41029d5abb9b0b6df825ecaf8adf9151762ea0688ac0fc4ea0ea34ab9a5808fc`（LFSハッシュと一致） |
-| ライセンス | ultralytics は AGPL-3.0。PDF-Extract-Kit のリポジトリも AGPL-3.0 と表示されている。Hugging Face のモデルカードには記載がない。AliceArchiveへ配布する前に必ず確認する |
+| ライセンス | ultralytics は AGPL-3.0。PDF-Extract-Kit のリポジトリも AGPL-3.0 と表示されている。Hugging Face のモデルカードには記載がない。配布する前に必ず確認する |
 | 置き場所 | `models/mfd_yolo_v8/`、`.venv-ml/`（いずれもGit管理外） |
 
 導入時に空き容量が1.9GBまで下がっていたため、ユーザーの承認を得てpipのダウンロードキャッシュ（669MB）を削除してから導入した。
@@ -249,7 +249,7 @@ tiny（主）とbase（検証用）で同じ枠を同じ手順で読み、**数�
 PADDLE_PDX_CACHE_HOME=$PWD/models/pp_cache PADDLE_PDX_MODEL_SOURCE=huggingface \
   .venv-pp/bin/python -c "from paddleocr import FormulaRecognition as F; F(model_name='PP-FormulaNet_plus-M')"
 ```
-ライセンスは、PaddleOCR・モデルとも Apache-2.0（配布元の表示）。AliceArchiveへ配布する前に再確認する。
+ライセンスは、PaddleOCR・モデルとも Apache-2.0（配布元の表示）。配布する前に再確認する。
 
 **Mathpix（外部サービス）**: `recognize/mathpix.py`。式の画像を `mpx scs convert`（/v3/text）で送る。**同意（`--allow-external`、画面は確認ダイアログ）がなければ、送らずに止まる。** 認証情報は `mpx configure` に任せ、このプログラムは読まない・保存しない。**Mathpix自体の精度は、実教材の画像を外部に送ることになるので、ユーザーの確認なしには測っていない**（試験は、偽の `mpx` で動作だけを確かめた）。
 

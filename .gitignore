@@ -23,3 +23,12 @@ models/
 outputs/
 runs/
 .venv-pp/
+# 個人の作業記録・AI への指示（手元にだけ置く）
+AI_LOG.md
+AGENTS.md
+CLAUDE_TASK.md
+CLAUDE.md
+.private/
+
+# アプリのアイコン（同梱）
+!src/pdf_latex_overlay/assets/*.png

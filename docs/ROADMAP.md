@@ -7,7 +7,7 @@
 | 2a | 手動矩形からUniMERNet認識。MacのCPUで動作時間、メモリと期待式の照合を記録 | `feat: recognize formula crops with UniMERNet` |
 | 2b | ページ全体から検出、座標変換、重複抑制。期待矩形とのIoUと検出漏れ・誤検出を報告 | `feat: detect and map formula regions` |
 | 2c | 既知のLaTeXを用いて両方式を実装、コピーと構造保持を比較して既定を決める | `feat: compare invisible text and ActualText embedding` |
-| 2d | CLIの通し試験、失敗・割り込み・再開試験、AliceArchiveからの呼び出し例 | `feat: add verified PDF processing CLI` |
+| 2d | CLIの通し試験、失敗・割り込み・再開試験、ほかのアプリからの呼び出し例 | `feat: add verified PDF processing CLI` |
 
 各段階で差分と対象テストを確認してローカルコミット。テスト不合格時は状態を報告し、合格扱いのコミットを作らない。機密・生成PDF・ログ・重みはGit管理外とし、合成サンプルの生成手順と期待値は管理する。
 
@@ -29,4 +29,4 @@
 | 2b | MinerU結果の取り込み（ページ・矩形・LaTeX）、座標変換と重複抑制、期待矩形とのIoU評価 | MinerUの出力JSON |
 | 1 | Mathpix検証ワークフローのドライラン。実送信は個別承認後 | 既存 `mpx` |
 
-各段階はテスト合格後にコミットし、非公開GitHubリポジトリへpushする。PyMuPDF（AGPL）とモデルのライセンスはAliceArchiveへの配布前に再確認する。
+各段階はテスト合格後にコミットする。PyMuPDF（AGPL）とモデルのライセンスは、配布前に再確認する。
