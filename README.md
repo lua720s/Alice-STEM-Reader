@@ -2,177 +2,179 @@
 
 # Alice STEM Reader
 
-**資料を見ながら、数式と文章を「その部分だけ」LaTeX・Markdown にする、手元で動く STEM リーダー。**
+**A local-first STEM reader: snip any part of a document and get editable LaTeX or Markdown.**
 
-PDF ビューアで教科書・論文・講義資料を読みながら、**フラッシュカードを作ったり、レポートや論文を書いたりするのに最適**です。
-気になる式を囲む（Snip する）だけで、編集できる LaTeX がクリップボードに入ります。画面に映っているもの、手書きのノートの写真、
-EPUB・DjVu・Markdown・LaTeX の原稿も、同じ操作で読めます。
+Read textbooks, papers and lecture notes in a PDF viewer and **make flashcards or write reports and papers as you go**. Draw a box around a formula — or press ⌃⌘M anywhere on your Mac, just like Mathpix Snip — and editable LaTeX lands on your clipboard. The same works for anything on screen, photos of handwritten notes, and EPUB, DjVu, Markdown and LaTeX sources.
 
-- **すべて手元の PC で動く。** 資料も画像も、外部に送りません（外部の認識サービスは、明示的に選んで同意したときだけ）。
-- **原本は変えない。** 認識の結果・メモ・変換した PDF は、別の場所（ライブラリ）に保存します。
-- **どこから来たかが残る。** Snip ごとに、資料名・ページ・範囲・資料のハッシュ・認識エンジンと版・日時を記録します。
-
-[English summary](#english)
+- **Runs entirely on your computer.** Documents and images are never uploaded (an external recognition service is used only if you explicitly choose it and consent).
+- **Originals are never modified.** Recognition results, notes and converted files are stored separately in a library.
+- **Provenance is kept.** Every Snip records the document, page, region, document hash, recognition engine and version, and time.
 
 ---
 
-## できること
+## Features
 
 | | |
 | --- | --- |
-| **Snip（範囲を読む）** | 画面の任意の範囲（macOS）・資料のページの範囲・画像（ファイル・貼り付け・ドロップ）を読み、**数式は LaTeX、文章＋数式は「文章 `\( … \)`」** にする。結果は履歴に残り、修正・コピー・書き出しができる |
-| **数式をクリックでコピー** | ページ全体の数式を検出・認識しておけば、式の枠をクリックするだけで LaTeX をコピー。見落とした式はドラッグで追加 |
-| **多くの形式** | PDF（スキャン可）・EPUB・MOBI・FB2・XPS・CBZ・DjVu・画像（PNG・JPEG・TIFF・HEIC・WebP など）・Markdown・LaTeX・テキスト |
-| **手書き** | 手書きの式やノートの写真も読める（スマートフォンの写真の向きは自動で補正） |
-| **書き出し** | Snip の履歴を **Markdown・LaTeX・TSV（フラッシュカードのアプリに読み込める）・JSON（出所の記録つき）** に。資料ごとに、認識した文章と数式を読む順に並べた **Markdown / LaTeX の原稿** も作れる |
-| **数式をコピーできる PDF** | 見た目は原本と同じまま、数式を選ぶと LaTeX が取れる派生 PDF を作る（macOS のプレビューなど、普通のビューアで使える）。外観・構造・コピーを検証してから保存 |
-| **確認を助ける** | 2 つのモデルの読みが食い違った式に「要確認」の印を付ける（任意） |
-| **資料の整理** | フォルダの階層をそのまま並べる（Obsidian 風）。名前の変更・移動・ゴミ箱、ビューア専用のフォルダ、まとめて OCR（中断・再開可） |
-| **使いやすさ** | 日本語・English・中文・Español・Русский、ライト / ダーク、キーボード操作、資料ごと・ページごとのメモ |
+| **Snip** | Read any region of the screen (macOS), of an open document, or of an image (file, paste, drop). **Formulas become LaTeX; text with formulas becomes text with `\( … \)`.** |
+| **Snip dashboard** | All Snips in one place: summary tiles, search, filters by kind and source, a list grouped by day, and a detail view with **OCR / Data / Original** tabs. Each result offers copyable formats (raw LaTeX, `\( \)`, `\[ \]`, Markdown `$ $` / `$$ $$`, text layer), a note field and provenance. Write new LaTeX or Markdown Snips from scratch. |
+| **Mathpix-style shortcuts** | ⌃⌘M snip the screen, ⌃⌘O open the app, ⌃⌘L / ⌃⌘N new LaTeX / Markdown Snip — system-wide via the menu bar app. In the dashboard ←/→, ⇧←/⇧→, ↑/↓, ⇧↑/⇧↓, Enter, ⇧Enter and Delete work as in Mathpix. **Every shortcut can be changed in Settings.** |
+| **Click-to-copy formulas** | Detect and recognize the formulas on a page, then click any box to copy its LaTeX. Drag to add missed formulas. |
+| **Many formats** | PDF (including scans), EPUB, MOBI, FB2, XPS, CBZ, DjVu, images (PNG, JPEG, TIFF, HEIC, WebP …), Markdown, LaTeX and plain text. |
+| **Handwriting** | Read photos of handwritten formulas and notes (phone photos are rotated automatically). |
+| **Export** | Snips as **Markdown, LaTeX, TSV (import into flashcard apps) or JSON (with provenance)**. Per document, an ordered **Markdown / LaTeX draft** of all recognized text and formulas, including your notes. |
+| **PDFs with copyable formulas** | Create a derived PDF that looks exactly like the original but lets any PDF viewer (e.g. macOS Preview) copy formulas as LaTeX. It is saved only after appearance, structure and copy checks pass. |
+| **Review support** | Optionally cross-check with a second model and flag formulas where the two disagree. |
+| **Library management** | Folders shown as a tree (like Obsidian); rename, move, move to Trash; viewer-only folders; batch OCR that can be cancelled and resumed. |
+| **Usability** | UI in English, Japanese, Chinese, Spanish and Russian; light and dark themes; keyboard-driven; per-document and per-page notes. |
 
-## はじめかた（macOS）
+## Getting started (macOS)
 
-アプリとして Launchpad・Spotlight・Raycast などのランチャーから開き、画面はいつものブラウザで表示します。
+Open the app from Launchpad, Spotlight, Raycast or any launcher; the interface opens in your usual browser.
 
 ```bash
 git clone https://github.com/lua720s/Alice-STEM-Reader.git && cd Alice-STEM-Reader
 python3.12 -m venv .venv && .venv/bin/pip install -e .
-scripts/setup_models.sh                                   # 認識モデルの導入（約 6GB、SHA-256 を照合）
-.venv/bin/python -m pdf_latex_overlay build-app            # ~/Applications にアプリを 2 つ作る
+scripts/setup_models.sh                                   # recognition models (~6 GB, SHA-256 verified)
+.venv/bin/python -m pdf_latex_overlay build-app            # builds two apps in ~/Applications
 ```
 
-- **Alice STEM Reader** — ビューアを開きます。左上の「＋」で資料やフォルダを追加。Finder で資料を右クリック →「このアプリケーションで開く」、アイコンへのドロップでも開けます（既定で開くアプリは変えません）。
-- **Alice STEM Snip** — 起動すると、すぐ画面の範囲選択になります。選んだ部分を読んで、**結果をクリップボードに入れ、通知でお知らせ**します。
-  キーボードショートカットに割り当てると、Mathpix Snip と同じ感覚で使えます（Raycast・Alfred のホットキー、または「ショートカット」アプリ）。
+- **Alice STEM Reader** opens the reader. Add documents or folders with "+" at the top left, or right-click a file in Finder → "Open With" → Alice STEM Reader, or drop it on the icon. Your default apps are not changed.
+- **Alice STEM Snip** lives in the menu bar (✂︎) and provides the system-wide shortcuts. Launching it from Launchpad, or pressing ⌃⌘M, starts a screen snip: drag over a region, and the result is copied to the clipboard with a notification. Choose **Start at Login** in its menu to keep the shortcuts available. Building it requires the Xcode Command Line Tools (`xcode-select --install`); without them, `build-app` creates a simpler app that snips when launched, without global shortcuts.
 
-初回だけ、macOS の許可が必要です。
+macOS asks for permission once:
 
-- **画面収録**: 「画面を Snip」を初めて使うとき（システム設定 → プライバシーとセキュリティ → 画面収録）。
-- **フォルダへのアクセス**: 書類などのフォルダを初めて開くとき。
+- **Screen Recording** — the first time you snip the screen (System Settings → Privacy & Security → Screen Recording).
+- **Folder access** — the first time a folder such as Documents is opened.
 
-ビューアは 1 つだけ常駐し、画面からの操作が 120 分なければ自動で終了します。
+Only one viewer runs at a time; it exits automatically after 120 minutes without activity from the browser.
 
-## 使いかた
+## Usage
 
 ### Snip
 
-| 操作 | 内容 |
+| Action | What it does |
 | --- | --- |
-| 右のパネルの **「画面を Snip」**（または `S`、上のバーの Snip） | 画面の範囲をドラッグで選ぶ。結果はクリップボードへ（Esc で取り消し） |
-| **「ページの範囲」**（`R` で切り替え）＋ページ上をドラッグ | 開いている資料の範囲を読む（枠は残さない）。文字層がある資料では「文字層を使う」も選べる |
-| 画像を **⌘V / Ctrl+V** で貼り付け、パネルへ **ドロップ**、**「画像…」** で選ぶ | スクリーンショット・手書きのノートの写真などを読む（複数可） |
-| **読み方** | 自動（文章と数式を見分ける）／数式（LaTeX）／文章 |
-| **書き出す…** | Markdown（`$…$`）・LaTeX・TSV・JSON |
+| **⌃⌘M** (anywhere), **S**, or **Snip screen** | Drag to select a region of the screen; the result is copied (Esc cancels) |
+| **Page area** (toggle with **R**), then drag on a page | Read a region of the open document without creating a box. For documents with a text layer, "Use text layer" is offered too |
+| Paste an image with **⌘V / Ctrl+V**, drop it on the Snip panel, or choose **Images…** | Read screenshots, photos of handwritten notes, etc. (several at once) |
+| **Reading mode** | Auto (tells text and math apart) / Math (LaTeX) / Text |
+| **D** or **Dashboard** | Open the Snip dashboard |
 
-**Markdown・テキスト・（コンパイルできなかった）LaTeX の原稿** をページの範囲で Snip すると、OCR を使わずに **原文そのもの** を取り出します（`$…$` の中身も崩れません）。
+Snipping a region of a **Markdown, plain-text, or uncompiled LaTeX source** returns **the source text itself**, without OCR (`$…$` stays intact).
 
-### 数式の検出と認識、派生 PDF
+### Snip dashboard
 
-- 上のバーの **「このページを認識」** で、表示中のページの数式を検出・認識。資料全体は ⋯ メニューの「OCRを行う」（フォルダや複数選択でも可。進み具合の表示・キャンセル・再開あり）。
-- 式の枠を **クリックでコピー**、右のパネルで修正・確定・除外・再認識。
-- **「このページの文章を認識」** で日本語などの文章も読む（緑の枠）。
-- **「PDFを保存」** で、数式（と文章）を不可視テキストとして埋め込んだ派生 PDF を作る。見た目が 1 画素でも変わる、構造が保てない、などの検証に通らなければ保存しません。
-- ⋯ メニューの **「認識した内容を Markdown / LaTeX に書き出す」** で、ページの上から下・左から右の順に並べた原稿（メモも含む）を作る。
+| Key (default) | Action |
+| --- | --- |
+| ← / → | Previous / next Snip |
+| ⇧← / ⇧→ | Oldest / most recent Snip |
+| ↑ / ↓ | Choose a format row |
+| ⇧↑ / ⇧↓ | Switch tabs (OCR, Data, Original) |
+| C or Space (or click a row) | Copy the selected format |
+| Enter | Edit; then Enter inserts a new line, **⇧Enter or ⌃Enter saves**, Esc cancels |
+| Delete | Delete the Snip |
+| / | Search |
+| Esc or D | Back to the reader |
 
-### キーボード
+Select Snips with their checkboxes to export just those; otherwise the export covers the Snips currently shown.
 
-| キー | 動作 | キー | 動作 |
+### Formula detection, recognition and derived PDFs
+
+- **Recognize this page** (⇧R) detects and recognizes the formulas on the current page. For a whole document, use "Run OCR" in the ⋯ menu (also for folders and multiple selections; progress, cancel and resume are supported).
+- **Click a box to copy** its LaTeX; correct, confirm, exclude or re-recognize it in the right panel.
+- **Recognize text on this page** (⇧T) reads text, including Japanese (green boxes).
+- **Save PDF** (⌘S) creates the derived PDF with formulas (and text) embedded as invisible text. It is not saved if verification fails — for example if the appearance changes by a single pixel or the structure cannot be preserved.
+- **Export recognized content as Markdown / LaTeX** (⋯ menu, ⇧⌘E) creates a draft in reading order (top to bottom, left to right), including your notes.
+
+### Keyboard shortcuts
+
+Defaults follow Mathpix Snip. Open **Settings** (⌘,) → **Keyboard shortcuts** to change any of them: click a key, press the new combination (Esc cancels, ⌫ removes the shortcut). Conflicts are detected, and each shortcut or all of them can be reset. Press **?** for the full list.
+
+| Global (via the menu bar app) | macOS | Windows / Linux (in the browser) |
+| --- | --- | --- |
+| Snip screen | ⌃⌘M | Ctrl+Alt+M |
+| Open the app | ⌃⌘O | Ctrl+Alt+O |
+| New Snip (LaTeX) | ⌃⌘L | Ctrl+Alt+L |
+| New Snip (Markdown) | ⌃⌘N | Ctrl+Alt+N |
+
+| Reader | Key | Reader | Key |
 | --- | --- | --- | --- |
-| `S` | 画面を Snip | `R` | ページ上のドラッグ: Snip ⇄ 枠を追加 |
-| `←` `→` `Space` | ページ送り | `F` | ページ全体 ⇄ 幅に合わせる |
-| `+` `-` `0` | 拡大・縮小・元に戻す | `B` | コレクションの開閉 |
-| `C` | 選んだ式をコピー | `Delete` | 選んだ枠を削除（元に戻せる） |
-| `N` / `Shift+N` | 次 / 前の「要確認」 | `/` | 資料を検索 |
+| Next / previous page | → ← (also Space, PgDn/PgUp, J/K) | Fit page ⇄ fit width | F |
+| Zoom in / out / reset | + − 0 | Show/hide collection | B |
+| Copy selected box | C | Delete selected box (undoable) | Delete |
+| Next / previous to review | N / ⇧N | Search documents | / |
+| Recognize page / text | ⇧R / ⇧T | Page-area Snip mode | R |
+| Open document | ⌘O | Save PDF | ⌘S |
+| Snip dashboard | D | Settings / shortcut list | ⌘, / ? |
 
-### コマンド
+### Command line
 
 ```bash
-alice-stem-reader viewer 資料フォルダ/ --backend unimernet     # ビューア（127.0.0.1 のみ）
-alice-stem-reader snip 写真.jpg --mode auto --copy            # 画像 1 枚を読む（--screen で画面の範囲）
-alice-stem-reader prepare 資料フォルダ/ --time-limit 28800    # 開く前にまとめて認識（夜間に。中断・再開可）
-alice-stem-reader convert 本.epub 本.pdf                      # PDF 以外を PDF に（原本は変えない）
-alice-stem-reader formats                                    # この環境で開ける形式と、足りない道具
-alice-stem-reader embed in.pdf out.pdf --formulas f.json     # 数式をコピーできる派生 PDF（検証つき）
+alice-stem-reader viewer my-documents/ --backend unimernet    # the viewer (127.0.0.1 only)
+alice-stem-reader snip photo.jpg --mode auto --copy           # read one image (--screen for a screen region)
+alice-stem-reader prepare my-documents/ --time-limit 28800    # recognize ahead of time, e.g. overnight (resumable)
+alice-stem-reader convert book.epub book.pdf                  # convert a non-PDF document (original untouched)
+alice-stem-reader formats                                     # supported formats and missing tools
+alice-stem-reader embed in.pdf out.pdf --formulas f.json      # derived PDF with copyable formulas (verified)
 ```
 
-`.venv/bin/alice-stem-reader` が入らない環境では `.venv/bin/python -m pdf_latex_overlay …` でも同じです。
+`.venv/bin/python -m pdf_latex_overlay …` works the same way.
 
-## 形式ごとの注意
+## Notes on formats
 
-| 形式 | 開き方 | 必要なもの |
+| Format | How it is opened | Requirements |
 | --- | --- | --- |
-| PDF | そのまま | — |
-| EPUB・MOBI・FB2・XPS・CBZ・SVG | A5・11pt にレイアウトして PDF に（文字層あり） | — |
-| 画像（PNG・JPEG・TIFF〔複数ページ〕・WebP・BMP・GIF） | 1 枚 1 ページ。写真の向きを補正 | — |
-| HEIC（iPhone の写真） | 同上 | macOS は標準で可。他は `pip install 'alice-stem-reader[heic]'` |
-| DjVu | PDF に変換 | DjVuLibre（`brew install djvulibre`） |
-| Markdown・テキスト | 原文をそのまま組版（数式は原文のまま） | — |
-| LaTeX（.tex） | **コンパイルして組版済みの PDF に**（`uplatex`〔日本語の文書クラス〕・`tectonic`・`lualatex`・`xelatex`・`pdflatex` の順に試す。シェルの実行は許可しない）。TeX がない・失敗したときは原文を組版し、理由を記録 | TeX（MacTeX など。任意） |
+| PDF | as is | — |
+| EPUB, MOBI, FB2, XPS, CBZ, SVG | laid out (A5, 11 pt) and converted to PDF, with a text layer | — |
+| Images (PNG, JPEG, TIFF incl. multi-page, WebP, BMP, GIF) | one page per image, orientation corrected | — |
+| HEIC (iPhone photos) | same as images | built in on macOS; elsewhere `pip install 'alice-stem-reader[heic]'` |
+| DjVu | converted to PDF | DjVuLibre (`brew install djvulibre`) |
+| Markdown, plain text | the source is typeset as is (math kept as written) | — |
+| LaTeX (.tex) | **compiled to a typeset PDF** (tries `uplatex` for Japanese document classes, then `tectonic`, `lualatex`, `xelatex`, `pdflatex`; shell escape disabled). Without TeX, or if compilation fails, the source is typeset and the reason recorded | a TeX distribution such as MacTeX (optional) |
 
-変換した PDF は、元のファイルの中身のハッシュで引くキャッシュに置き、同じ中身なら作り直しません。
+Converted PDFs are cached by the content hash of the original file and are not regenerated while the content is unchanged.
 
-## 精度と限界
+## Accuracy and limitations
 
-- 数式の認識は [UniMERNet](https://github.com/opendatalab/UniMERNet) base（既定）・tiny、PP-FormulaNet、Mathpix（外部・任意）から選べます。実際の参考書のスキャン 33 式では、base 24 式・tiny 17 式・PP-FormulaNet 8 式が正しく読めました（[記録](docs/MODELS.md)）。**認識の誤りは必ずあります。** 重要な式は、プレビューと元の画像を見比べて確認してください。
-- 「要確認」の印（`--verify`）は、2 つのモデルが同じ間違い方をした式を見逃します。
-- 手書きの読み取りは、字の丁寧さや写真の明るさ・ピントに大きく左右されます。文章の手書き（特に日本語）は、活字ほど正確ではありません。
-- 画面の Snip は macOS のみ（他の環境では、スクリーンショットを貼り付けてください）。
-- CPU では、1 ページの検出と認識に数十秒かかります。よく使う資料は `prepare` で先に処理しておくと、開いてすぐコピーできます。
+- Formula recognition can use [UniMERNet](https://github.com/opendatalab/UniMERNet) base (default) or tiny, PP-FormulaNet, or Mathpix (external, optional). On 33 formulas from a real scanned textbook, base read 24 correctly, tiny 17 and PP-FormulaNet 8 ([details](docs/MODELS.md)). **Recognition errors do occur.** Check important formulas against the preview and the original image.
+- The "needs review" flag (`--verify`) misses formulas that both models misread in the same way.
+- Handwriting accuracy depends heavily on legibility, lighting and focus, and has not been measured systematically. Handwritten text (especially Japanese) is less accurate than print.
+- Screen snipping and the global shortcuts are macOS-only; elsewhere, paste a screenshot.
+- On a CPU, detecting and recognizing one page takes tens of seconds. Process frequently used documents ahead of time with `prepare` so they are ready to copy immediately.
 
-## データとプライバシー
+## Data and privacy
 
-| 置き場所 | 中身 |
+| Location | Contents |
 | --- | --- |
-| 資料のフォルダ | 何も作りません（名前の変更・移動・ゴミ箱は、操作したときだけ） |
-| `library/<資料のハッシュ>/` | 式の枠と LaTeX、変更の履歴（`history.jsonl`）、メモ、書き出した PDF |
-| `library/_converted/` | PDF 以外から変換した PDF と、変換の記録 |
-| `library/_snips/` | Snip の画像と記録（出所・エンジン・日時） |
-| `~/Library/Application Support/Alice STEM Reader/` | アプリの設定（追加したフォルダなど） |
+| Your document folders | Nothing is created (rename, move and Trash only happen when you ask) |
+| `library/<document hash>/` | Formula boxes and LaTeX, edit history (`history.jsonl`), notes, exported PDFs |
+| `library/_converted/` | PDFs converted from other formats, with a conversion record |
+| `library/_snips/` | Snip images and records (source, engine, time) |
+| `~/Library/Application Support/Alice STEM Reader/` | App settings (added folders, global shortcuts, delimiter style) |
 
-`library/` の場所は環境変数 `PLO_LIBRARY` で変えられます。
+Set `PLO_LIBRARY` to move `library/`.
 
-- ビューアは `127.0.0.1` だけで待ち受け、起動ごとのトークンがないと操作できません（他の PC からは使えません）。
-- 画面（ブラウザ）は外部と通信しません（Content-Security-Policy で自分自身だけに制限。数式の表示に使う KaTeX も同梱）。
-- Mathpix は、画面の確認ダイアログ、またはコマンドの `--allow-external` で同意したときだけ使います。
+- The viewer listens on `127.0.0.1` only and requires a per-launch token (it cannot be used from other computers).
+- The browser interface makes no external requests (Content-Security-Policy restricted to itself; KaTeX for math rendering is bundled).
+- Mathpix is used only after you consent in the confirmation dialog, or with `--allow-external` on the command line.
 
-## 依存ソフトウェアとライセンス
+## Dependencies and licenses
 
-主な依存: [PyMuPDF](https://pymupdf.readthedocs.io/)（AGPL-3.0）、[pikepdf](https://pikepdf.readthedocs.io/)（MPL-2.0）、[UniMERNet](https://github.com/opendatalab/UniMERNet)（Apache-2.0）、
-[PDF-Extract-Kit MFD](https://github.com/opendatalab/PDF-Extract-Kit) / [ultralytics](https://github.com/ultralytics/ultralytics)（AGPL-3.0）、[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)（Apache-2.0）、
-[KaTeX](https://katex.org/)（MIT、`viewer/static/vendor/katex/` に同梱）、DjVuLibre（GPL、任意・別途導入）。
-配布・組み込みの際は、各ライセンスの条件に従ってください。モデルの重みはリポジトリに含めず、`scripts/setup_models.sh` で配布元から取得します。
+Main dependencies: [PyMuPDF](https://pymupdf.readthedocs.io/) (AGPL-3.0), [pikepdf](https://pikepdf.readthedocs.io/) (MPL-2.0), [UniMERNet](https://github.com/opendatalab/UniMERNet) (Apache-2.0), [PDF-Extract-Kit MFD](https://github.com/opendatalab/PDF-Extract-Kit) / [ultralytics](https://github.com/ultralytics/ultralytics) (AGPL-3.0), [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) (Apache-2.0), [KaTeX](https://katex.org/) (MIT, bundled in `viewer/static/vendor/katex/`), and DjVuLibre (GPL, optional, installed separately). Follow the terms of each license when distributing or embedding. Model weights are not included in the repository; `scripts/setup_models.sh` downloads them from their publishers.
 
-## 開発
+## Development
 
 ```bash
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest -q                 # 合成データでの試験（モデル不要）
-.venv/bin/python -m pytest -q -m model        # 実モデルを使う試験（導入後）
+.venv/bin/python -m pytest -q                 # tests on synthetic data (no models needed)
+.venv/bin/python -m pytest -q -m model        # tests with real models (after installing them)
 ```
 
-- [要件と合格基準](docs/REQUIREMENTS.md) ・ [設計](docs/DESIGN.md) ・ [モデルと認識の評価](docs/MODELS.md) ・ [Mathpix との比較検証](docs/MATHPIX_VALIDATION.md) ・ [ロードマップ](docs/ROADMAP.md)
-- アプリから他のプログラムを一緒に起動したいときは、`~/Library/Application Support/Alice STEM Reader/hooks/on-launch` に実行できるファイルを置いてください（アプリを開くたびに裏で実行します）。
-- ほかのアプリから派生 PDF を作る例: [examples/embed_adapter.py](examples/embed_adapter.py)
+- [Requirements](docs/REQUIREMENTS.md) · [Design](docs/DESIGN.md) · [Model evaluation](docs/MODELS.md) · [Mathpix validation](docs/MATHPIX_VALIDATION.md) · [Roadmap](docs/ROADMAP.md)
+- To start other programs whenever the app opens, place an executable at `~/Library/Application Support/Alice STEM Reader/hooks/on-launch` (it runs in the background on each launch).
+- Example of creating derived PDFs from another application: [examples/embed_adapter.py](examples/embed_adapter.py)
 
-### 「Failed to fetch」と出たとき
+### "Failed to fetch"
 
-ブラウザが、このPCで動いているビューアに届かなかったときの表示です。ビューアが終了した（120 分操作がなかった、など）か、起動し直して接続先が変わっています。
-アプリをもう一度開くか、コマンドで起動したときに表示された新しい URL を開き直してください。ログは `~/Library/Logs/Alice STEM Reader.log` です。
-
----
-
-<a id="english"></a>
-
-## English
-
-**Alice STEM Reader** is a local-first STEM document reader. Read textbooks, papers and lecture notes, and **snip any region to get editable LaTeX** (or text with inline math) — ideal for **making flashcards and writing reports and papers** while you read.
-
-- **Snip anything**: a region of the screen (macOS), a region of an open document, or an image (file, paste, drop) — including **photos of handwritten notes**. Results are kept in a history with full **provenance** (document, page, region, SHA-256, engine & version, time) and can be exported as **Markdown, LaTeX, TSV (flashcard apps) or JSON**.
-- **Many formats**: PDF (incl. scans), EPUB, MOBI, FB2, XPS, CBZ, **DjVu**, images (PNG/JPEG/TIFF/HEIC/WebP…), **Markdown** and **LaTeX** (compiled when TeX is available; snipping Markdown/LaTeX source returns the exact source text, no OCR).
-- **Click-to-copy formulas** after page-level detection (PDF-Extract-Kit MFD) and recognition (UniMERNet by default; PP-FormulaNet; Mathpix opt-in), mixed Japanese/English text + math (PaddleOCR), optional two-model cross-check.
-- **Derived PDFs** that look identical to the original but let any PDF viewer copy formulas as LaTeX, published only after appearance/structure/copy verification.
-- **Private by design**: runs on `127.0.0.1` with a per-launch token; the browser UI makes no external requests (strict CSP, KaTeX bundled); originals are never modified.
-- **Launcher apps**: `build-app` creates *Alice STEM Reader.app* (opens the viewer in your browser; appears in Finder's “Open With” for supported formats) and *Alice STEM Snip.app* (screen snip → clipboard; bind it to a hotkey).
-- UI in Japanese, English, Chinese, Spanish and Russian; light/dark themes; keyboard-driven.
-
-Quick start (macOS): see [はじめかた](#はじめかたmacos) above — `pip install -e .`, `scripts/setup_models.sh`, `python -m pdf_latex_overlay build-app`.
+The browser could not reach the viewer running on this computer: it has exited (for example after 120 minutes of inactivity) or was restarted with a new address. Open the app again, or open the new URL printed when you started it from the command line. The log is at `~/Library/Logs/Alice STEM Reader.log`.

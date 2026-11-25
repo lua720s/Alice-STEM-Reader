@@ -1,393 +1,306 @@
-# モデルと認識の記録
+# Models and recognition: evaluation record
 
-## UniMERNet（段階2a）
+All measurements below were made locally on an Apple M1 with 8 GB RAM (macOS 27.0.1, CPU only) unless noted. Copyrighted test documents, ground-truth files and derived PDFs are kept in `runs/` (not tracked by Git); only numbers and findings are recorded here. Ground truth was transcribed by hand from magnified images, and the samples are small: treat the results as indications, not benchmarks.
 
-| 項目 | 内容 |
+Model weights are installed with `scripts/setup_models.sh`, which downloads them from their publishers and checks the SHA-256 hashes listed here.
+
+## UniMERNet (step 2a)
+
+| Item | Details |
 | --- | --- |
-| 配布元 | [opendatalab/UniMERNet](https://github.com/opendatalab/UniMERNet)、重みは Hugging Face `wanderkid/unimernet_tiny` |
-| 版 | パッケージ `unimernet==0.2.3`、重みのリビジョン `3f09ac4b1cd583be47ea20a7d7daef839473028a` |
-| 重み | `unimernet_tiny.pth`（430,075,701 バイト、SHA-256 `6f7608624e2d7549c7f0f05fcfbe073ae521328cf70f1d46374d96f9881d7371`、配布元のLFSハッシュと一致） |
-| ライセンス | パッケージ・重みとも Apache-2.0（PyPI と Hugging Face の表示）。配布する前に再確認する |
-| 置き場所 | `models/unimernet_tiny/`、`.venv-ml/`（いずれもGit管理外） |
+| Source | [opendatalab/UniMERNet](https://github.com/opendatalab/UniMERNet); weights on Hugging Face `wanderkid/unimernet_tiny` / `unimernet_small` / `unimernet_base` |
+| Versions | package `unimernet==0.2.3`; tiny weights revision `3f09ac4b1cd583be47ea20a7d7daef839473028a` |
+| Weights | `unimernet_tiny.pth` 430,075,701 bytes, SHA-256 `6f7608624e2d7549c7f0f05fcfbe073ae521328cf70f1d46374d96f9881d7371` (matches the publisher's LFS hash) |
+| License | Apache-2.0 for both package and weights (as stated on PyPI and Hugging Face); recheck before distribution |
+| Location | `models/unimernet_*/`, `.venv-ml/` (not tracked) |
 
-8GB RAMのM1で動かすため、tiny（small 810MB、base はさらに大きい）を選んだ。依存が `transformers==4.42.4` などを固定するので、本体とは別の venv に入れ、子プロセス（`recognize/unimernet_worker.py`、JSON Lines）で呼ぶ。
+The model pins dependencies such as `transformers==4.42.4`, so it runs in a separate venv as a child process (`recognize/unimernet_worker.py`, JSON Lines).
 
-### 導入手順
+### Manual installation
 
 ```bash
-/opt/homebrew/bin/python3.12 -m venv .venv-ml
+python3.12 -m venv .venv-ml
 .venv-ml/bin/pip install --no-cache-dir -r requirements-ml.txt
 REV=3f09ac4b1cd583be47ea20a7d7daef839473028a
 mkdir -p models/unimernet_tiny
 for f in config.json preprocessor_config.json tokenizer.json tokenizer_config.json README.md unimernet_tiny.pth; do
   curl -sSfL -o "models/unimernet_tiny/$f" "https://huggingface.co/wanderkid/unimernet_tiny/resolve/$REV/$f"
 done
-shasum -a 256 models/unimernet_tiny/unimernet_tiny.pth   # 上表の値と一致すること
+shasum -a 256 models/unimernet_tiny/unimernet_tiny.pth   # must match the hash above
 ```
 
-場所は環境変数 `PLO_ML_PYTHON`、`PLO_UNIMERNET_DIR` で変えられる。重みやML用Pythonがなければ、`recognize` は終了コード8（モデル不足）で止まり、出力を作らない。
+Locations can be changed with `PLO_ML_PYTHON` and `PLO_UNIMERNET_DIR`. Without weights or the ML Python, `recognize` stops with exit code 8 (model missing) and writes nothing.
 
-### 実測（2026-11-18、Apple M1・8GB・macOS 27.0.1、CPU）
+### First measurement (2026-11-18, synthetic fixtures)
 
-- モデル読み込み 約19秒、1式あたり 約1.3秒、ワーカーの最大常駐メモリ 約1.0GB。MPS は未計測。
-- 対象は合成フィクスチャ11式。式は matplotlib mathtext の Computer Modern で描いている。画像化PDFは150 dpi、切り出しは200 dpi。ベクターPDFは300 dpiで切り出した。
+- Model load about 19 s, about 1.3 s per formula, peak worker memory about 1.0 GB. MPS not measured.
+- 11 synthetic formulas drawn in Computer Modern (matplotlib mathtext). Rasterized PDF at 150 dpi cropped at 200 dpi; vector PDF cropped at 300 dpi.
 
-| 指標 | 画像化PDF | ベクターPDF |
+| Metric | Rasterized PDF | Vector PDF |
 | --- | --- | --- |
-| 空白を除いた完全一致 | 2 / 11 | 3 / 11 |
-| 緩い一致（`\textstyle`・`\!`・`\,`・`\mathop{=}`・1行の `array` 包みを除く。意味の一致は保証しない） | 7 / 11 | 7 / 11 |
-| 文字列類似度の平均 | 0.79 | 0.79 |
+| Exact match ignoring whitespace | 2 / 11 | 3 / 11 |
+| Loose match (ignoring `\textstyle`, `\!`, `\,`, `\mathop{=}`, single-line `array` wrappers; does not guarantee equal meaning) | 7 / 11 | 7 / 11 |
+| Mean string similarity | 0.79 | 0.79 |
 
-目視では、本文の文字として描いた `E=mc^2` とページ境界で切れた式を除く9式は、すべて数学的に同じ内容だった（例: `\operatorname*{lim}` と `\lim`、余分な波括弧）。最初にmatplotlibの既定の書体（サンセリフ）で描いたときは、`\ln x` を `|\boldsymbol{\cap}\times` と読むなど誤りが多かった。書体の違いが精度に強く影響する。
+By inspection, all 9 formulas other than `E=mc^2` drawn as body text and a formula clipped at the page edge were mathematically identical (e.g. `\operatorname*{lim}` vs `\lim`, extra braces). With matplotlib's default sans-serif math font the error rate was much higher (e.g. `\ln x` read as `|\boldsymbol{\cap}\times`): typeface strongly affects accuracy.
 
-- 認識器の出力は字句ごとに空白が入る。`ocr_latex` には原文を保存し、`latex` には意味を変えない範囲で空白を詰めたものを入れる（`tidy_latex`）。制御語の直後の英字の前、制御空白、`\text{...}` の中の空白は残す。
-- 実教材での精度は未測定。著作物PDFはリポジトリに入れない。
+- The recognizer emits spaces between tokens. `ocr_latex` keeps the raw output; `latex` holds a version with whitespace collapsed where meaning is unaffected (`tidy_latex`). Spaces before letters following control words, control spaces and spaces inside `\text{...}` are kept.
 
-## MinerU 結果の取り込み（段階2b）
+## Importing MinerU results (step 2b)
 
-`import-mineru` は、利用者が別途実行したMinerUの結果JSONを式JSONに変換する。MinerU本体は導入していない。理由は次の3点。
-- MinerU 4.2.3 は torch、transformers 5、gradio、llama-cpp、VLMモデルを要求し、空き容量（4.2GB）では導入後に停止基準の4GBを下回る。
-- ライセンスが独自の「MinerU Open Source License」で、配布前に確認が要る。
-- 2026-11-18時点で、このMacにMinerUの実行環境も過去の出力も見つからなかった（`~/.mineru` にONNXの配置・OCRモデルだけがある）。
+`import-mineru` converts MinerU output JSON (produced separately by the user) into this project's formula JSON. MinerU itself is not installed because (1) MinerU 4.2.3 requires torch, transformers 5, gradio, llama-cpp and VLM models, which did not fit the available disk space; (2) it uses its own "MinerU Open Source License", which needs review before distribution.
 
-対応形式は、MinerU 4.2.3 と docvortex 0.6 のソースで確認した。
+Supported formats (verified against the MinerU 4.2.3 and docvortex 0.6 sources):
 
-| 形式 | 数式の取り方 | 座標 |
+| Format | Formulas | Coordinates |
 | --- | --- | --- |
-| MinerU 4 `middle.json`（`"schema": "docvortex.middle"`） | `type: "equation"` のブロック | 0〜1 の正規化 |
-| `content_list.json`（V1） | `type: "equation"`、`text`（`$$` を外す） | 0〜1000 の整数 |
-| 旧 `middle.json`（`pdf_info`） | `interline_equation`・`inline_equation` の span | pt、`page_size` 基準 |
+| MinerU 4 `middle.json` (`"schema": "docvortex.middle"`) | blocks with `type: "equation"` | normalized 0–1 |
+| `content_list.json` (V1) | `type: "equation"`, `text` (outer `$$` removed) | integers 0–1000 |
+| legacy `middle.json` (`pdf_info`) | `interline_equation` / `inline_equation` spans | points, relative to `page_size` |
 
-- **MinerU 4 の行内数式には矩形がない**（`equation_inline` の span は `type` と `content` だけ）。個別に埋め込めないので、取り込み時に `inline_no_bbox` として除外記録する。ビューアで枠を描けば、手動で追加・再認識できる。
-- 座標は表示どおりのページ画像（回転後、左上原点）を基準とみなし、回転前の保存座標へ変換する。旧形式は `page_size` で判定する。回転180度のページは回転前後で寸法が同じため判別できず、`rotate180_frame_ambiguous` の警告を残す。`--frame unrotated` で基準を明示できる。
-- 同じページで IoU 0.5 を超えて重なる式は、後のものを `duplicate_of:` として除外する。
-- 合成した3形式のJSONで取り込みを試験した。回転0/90/180/270と非ゼロCropBoxを含め、期待矩形とのIoUは平均0.98超（content_listは整数丸めのため0.9超）で、検出漏れ・誤検出は0件。そのまま埋め込みと検証も通った。
-- **未実施**: 実際のMinerUの出力での照合と、座標基準（特に回転ページ）の実機確認。ページ全体からの独自の数式検出（PDF-Extract-Kit の MFD など）は実装していない。
+- **MinerU 4 inline formulas have no rectangle** (an `equation_inline` span has only `type` and `content`). They cannot be embedded individually, so they are recorded as excluded (`inline_no_bbox`); a box drawn in the viewer adds and re-recognizes them.
+- Coordinates are taken to be relative to the page as displayed (rotated, top-left origin) and are converted to unrotated storage coordinates. Legacy files are disambiguated with `page_size`. Pages rotated by 180° have the same size before and after rotation and cannot be disambiguated; a `rotate180_frame_ambiguous` warning is recorded, and `--frame unrotated` sets the frame explicitly.
+- Formulas overlapping another on the same page with IoU > 0.5 are excluded as `duplicate_of:`.
+- Tested with synthetic JSON in all three formats, including rotation 0/90/180/270 and non-zero CropBox: mean IoU against expected rectangles above 0.98 (above 0.9 for content_list because of integer rounding), no misses or false positives; embedding and verification passed.
+- With a real MinerU 4 output (`docvortex.middle` 2.0) for a scanned two-page spread, the 3 display-formula blocks were imported with coordinates matching an independent conversion; the 12 inline formulas had no rectangles and were excluded as expected. Two of the display blocks covered several lines and repeated the same terms in their LaTeX, so they were not usable.
 
-## 実教材での試験（2026-11-19）
+## Real-document test (2026-11-19)
 
-市販の数学参考書（積分法の例題・練習、見開き2ページ）をスキャンしたPDFで試した。文字層はなく、画像だけのページ。ローカルだけで処理し、外部には送っていない。教材PDF、正解ファイル、派生PDFは `runs/realtext/`（Git管理外）に置き、ここには数値と所見だけを記録する。元ファイルのSHA-256は処理の前後で一致した。
+A scanned spread (2 pages, image only, no text layer) from a commercial Japanese calculus workbook (integration examples and exercises) was processed locally; nothing was sent externally. The original's SHA-256 was unchanged.
 
-**対象**: 1行の式11件（問題の定積分5件と、解答の行6件）。矩形は手作業で測った。正解は目視で書き起こし、拡大画像で確認した。書き起こしの途中で、練習(3)の下端は1ではなく4と判明した。以前の MinerU と Codex の UniMERNet はどちらも1と読んでいた。
+**Target:** 11 single-line formulas (5 definite integrals from the problems, 6 lines from the solutions), rectangles measured by hand. While transcribing, the lower limit of exercise (3) turned out to be 4, not 1 — earlier automated readings had all read 1.
 
-**MinerU（Codexが2026-11-18に実行した結果）の取り込み**
-- 実際のMinerU 4出力（`docvortex.middle` 2.0）を `import-mineru` で読めた。表示数式のブロックは3件で、座標はCodexが別に換算した値と一致した。
-- 行内数式12件には矩形がなく、`inline_no_bbox` として除外された（スキーマ調査どおり）。
-- 表示数式ブロックのうち2件は、複数行をまとめた大きな領域だった。LaTeXも同じ項の繰り返しで、使えなかった。
+**UniMERNet tiny (CPU)**
 
-**UniMERNet-tiny の認識（CPU）**
-
-| 切り出し解像度 | 緩い一致 | 目視で数学的に正しい | 文字列類似度の平均 |
+| Crop resolution | Loose match | Mathematically correct (by inspection) | Mean string similarity |
 | --- | --- | --- | --- |
 | 300 dpi | 3 / 11 | 5 / 11 | 0.75 |
 | 200 dpi | 4 / 11 | 6 / 11 | 0.78 |
 | 150 dpi | 4 / 11 | 6 / 11 | 0.82 |
 
-- 解像度で結果が変わり、どの式が正しくなるかも入れ替わった。主な誤りは次のとおり。
-  - 積分の上端 `e` を `\infty` と読む。
-  - `e^{-4}` を `e^{-1}` と読む。
-  - 小さい分数を `\stackrel` にする。
-  - 1件は積分記号の繰り返しで崩れた。
-- 問題の5式に限ると、MinerUの行内数式（Codexの実行結果）は目視で4件が正しかった。UniMERNet-tinyは3件だった。
-- **結論**: 実際のスキャンでは、tinyモデルの認識をそのまま埋め込める水準ではない。ビューアでの確認・修正を前提にする。より大きいモデル（small 810MB）は、空き容量の制約で試していない。
+Resolution changed which formulas were correct. Typical errors: upper limit `e` read as `\infty`; `e^{-4}` as `e^{-1}`; small fractions as `\stackrel`; one formula collapsed into repeated integral signs. **Conclusion at this stage:** recognition of real scans could not be embedded unreviewed; the viewer's check-and-correct workflow is assumed. (Post-processing improvements below later raised tiny to 9 / 11.)
 
-**埋め込みとコピー（修正後のLaTeX、11件）**
-- 最初の試験で、検証が2件の不合格を検出し、派生PDFは公開されなかった（失敗時停止が働いた）。
-  1. 51文字のLaTeXを幅59ptに詰めた式で、MuPDFが隣り合う `}}` の片方を重複字形として捨てた。
-  2. 背の高い式の右下にある式が、PDFKitで同じ行にまとめられ、矩形選択が空になった。
-- 対策: 字形の帯を矩形の高さの65%に収めて上下中央に置き、横方向の最小倍率（0.35）を設けた（`embed.py` の `BAND`、`MIN_HSCALE`）。両方の状況を合成した回帰試験を追加し、旧コードで失敗することを確認した。
-- 対策後の結果は次のとおり。
-  - 72・150 dpiで画素差0。
-  - PDFKitの矩形選択で11件すべてが完全一致し、ページ全文にも各1回だけ出現した。
-  - MuPDF抽出も全件一致した。
-  - UniMERNetの生の出力を埋め込んだ場合も、検証は通った（中身の正しさは上表のとおり）。
-- **未実施**: macOSプレビューでの手動のドラッグ選択。
+**Embedding and copying (corrected LaTeX, 11 formulas)**
+- The first run was blocked by verification (stop-on-failure worked) for two reasons: (1) a 51-character LaTeX squeezed into 59 pt, where MuPDF discarded one of two adjacent `}}` as a duplicate glyph; (2) a formula to the lower right of a tall formula was merged into the same line by PDFKit, so rectangle selection returned nothing.
+- Fix: the glyph band is fitted into 65% of the rectangle height and centered, with a minimum horizontal scale of 0.35 (`BAND`, `MIN_HSCALE` in `embed.py`). Regression tests reproducing both situations fail on the old code.
+- After the fix: zero pixel difference at 72 and 150 dpi; PDFKit rectangle selection exactly matched all 11 formulas and each appeared once in the page text; MuPDF extraction matched all. Embedding raw UniMERNet output also passed verification (its correctness is as in the table above).
+- Not done: manual drag selection in macOS Preview.
 
-### 行分割と整形（2026-11-19）
+### Line splitting and cleanup (2026-11-19)
 
-ビューアで2行の計算を1つの枠で囲むと、UniMERNetは `\begin{array}` で2行をまとめた。そのうえ、表示用の記法（`\displaystyle`、`\!`、二重の波括弧）と誤読（太字の1を `\bf\Pi`、行頭の「=」を `\overline`）が混ざった。
+When a box in the viewer covers two lines of calculation, UniMERNet joined them in `\begin{array}`, mixed in display-only markup (`\displaystyle`, `\!`, double braces) and misread some symbols (a bold 1 as `\bf\Pi`, a leading `=` as `\overline`). Pre- and post-processing was added (`recognize/postprocess.py`, `recognize/region.py`):
 
-そこで認識の前後に次の処理を加えた（`recognize/postprocess.py`、`recognize/region.py`）。
+- **Line splitting:** horizontal ink profiles find blank gaps of at least 2.5 pt. Fragments under 6 pt tall or narrower than 35% of the widest line (limits of ∑ and ∫) are not counted as lines; partial neighbouring lines cut by the box edge are dropped; thin vertical rules and dotted lines at the left and right edges (frame borders) are whitened.
+- **Retrying degenerate output:** output such as repeated tokens is re-read from the image scaled by 0.75 and 1.3.
+- **Cleanup:** display-only markup is removed and brace balance repaired; lines are joined with newlines.
 
-- **行分割**: 横方向のインク量で、2.5pt以上の空白行を探して行に分ける。
-  - 次のものは行と数えない: 高さ6pt未満の断片、幅が最も広い行の35%未満の断片（∑・∫の上端・下端など）。
-  - 枠の端で切れた隣の行の一部は捨てる。
-  - 枠の左右の端にある細い縦線や点線（囲み枠の罫線）は白で消す。
-- **崩れた出力の読み直し**: 同じ字句の反復など崩れた出力は、画像を0.75倍・1.3倍にして読み直す。
-- **整形**: 表示だけの記法を除き、波括弧の釣り合いを直す。行は改行でつなぐ。
+On a user-drawn two-line box at 200 dpi, the second line matched exactly; the first line's ending `\int\frac{1}{2}x\,dx` became `\int_{2}xdx` (recognition error). Another three-line box on the same spread was also split correctly. All synthetic fixture formulas stay single-line (not split).
 
-実教材での結果（ユーザーが囲んだ2行、200 dpi）:
-- 2行目は期待どおりの完全一致になった。
-- 1行目は、末尾の `\int\frac{1}{2}x\,dx` が `\int_{2}xdx` になった（認識の誤り）。
+## Formula detection: MFD (2026-11-19)
 
-同じ見開きの別の3行の枠でも、行ごとに分けて認識できた。どちらも、括弧の向きや上端・下端の文字に誤りが残る。合成フィクスチャの全式は1行のまま（分割されない）であることも試験で確認した。
-
-## 数式検出 MFD（2026-11-19、開いた時点での自動認識）
-
-| 項目 | 内容 |
+| Item | Details |
 | --- | --- |
-| 配布元 | [PDF-Extract-Kit](https://github.com/opendatalab/PDF-Extract-Kit)（UniMERNet公式が勧める検出器）。重みは Hugging Face `opendatalab/PDF-Extract-Kit-1.0` の `models/MFD/YOLO/yolo_v8_ft.pt` |
-| 版 | リビジョン `ed6b654c018d742e65a17671e379c5e6ecc87ec9`、`ultralytics==8.4.215` |
-| 重み | 349,867,002 バイト、SHA-256 `41029d5abb9b0b6df825ecaf8adf9151762ea0688ac0fc4ea0ea34ab9a5808fc`（LFSハッシュと一致） |
-| ライセンス | ultralytics は AGPL-3.0。PDF-Extract-Kit のリポジトリも AGPL-3.0 と表示されている。Hugging Face のモデルカードには記載がない。配布する前に必ず確認する |
-| 置き場所 | `models/mfd_yolo_v8/`、`.venv-ml/`（いずれもGit管理外） |
+| Source | [PDF-Extract-Kit](https://github.com/opendatalab/PDF-Extract-Kit) (the detector recommended by UniMERNet); weights on Hugging Face `opendatalab/PDF-Extract-Kit-1.0`, `models/MFD/YOLO/yolo_v8_ft.pt` |
+| Versions | revision `ed6b654c018d742e65a17671e379c5e6ecc87ec9`, `ultralytics==8.4.215` |
+| Weights | 349,867,002 bytes, SHA-256 `41029d5abb9b0b6df825ecaf8adf9151762ea0688ac0fc4ea0ea34ab9a5808fc` (matches the LFS hash) |
+| License | ultralytics is AGPL-3.0; the PDF-Extract-Kit repository is also marked AGPL-3.0; the model card states none. Always check before distribution |
+| Location | `models/mfd_yolo_v8/`, `.venv-ml/` (not tracked) |
 
-導入時に空き容量が1.9GBまで下がっていたため、ユーザーの承認を得てpipのダウンロードキャッシュ（669MB）を削除してから導入した。
+**Settings (tuned on the real document):** 200 dpi page images, imgsz 1888, conf 0.1; boxes are enlarged by 3 pt horizontally and 6 pt vertically; boxes at least 80% inside a larger box are dropped; multi-line (isolated) blocks are split into per-line boxes.
 
-**検出の設定（実教材で決めた）**
-- 200 dpiのページ画像、imgsz 1888、conf 0.1。検出枠は横3pt・縦6pt広げる。
-- 大きい枠に8割以上含まれる枠は除く。
-- 複数行のまとまり（isolated）は、行ごとの枠に分ける。
-
-| 設定 | 手作業の正解11式のうち、検出枠が9割以上を覆った数 |
+| Setting | Of the 11 hand-labelled formulas, boxes covering ≥ 90% |
 | --- | --- |
-| conf 0.25、広げない（MinerUの既定に近い） | 5 |
-| conf 0.1、横3pt・縦6pt広げる（採用） | 8 |
+| conf 0.25, no enlargement (close to MinerU defaults) | 5 |
+| conf 0.1, enlarged 3 pt / 6 pt (adopted) | 8 |
 
-見落としたのは、例題(2)の積分、右欄の `∫e^{-t}dt=-e^{-t}+C`、練習(3)の3件。
+Missed: the integral in example (2), `∫e^{-t}dt=-e^{-t}+C` in the right column, and the three formulas of exercise (3).
 
-**開いた時点での自動認識（実教材2ページ、CPU）**
-- 検出は約20秒。手で描いた枠を除き41個の枠ができ、41個すべての認識が約85秒で終わった。
-- 解答の多くの行は、ほぼ正しいLaTeXになった（例: `=-48e^{-4}+16e^{-2}-4e^{-4}+4e^{-2}`、`\int xdx=\frac{1}{2}x^{2}+C`、`\sqrt{x}=t`）。
-- 次の誤りもあった。
-  - 日本語の文や丸数字を、行内数式として誤検出した（`\mathfrak{H}…`、`=057k.` など、約8件）。
-  - 波線や大きな括弧で行の間がつながり、2行が1つの枠になった。
-  - 小さい文字の誤認識（`e^{-4}` を `e^{-i}`、添字の `1` を `!`）。
-- 誤検出の枠は、ビューアで「除外」か「削除」を選ぶ。見落とした式は、ドラッグで追加する。
+**Whole-spread recognition (2 pages, CPU):** detection took about 20 s and produced 41 boxes (excluding hand-drawn ones); recognizing all 41 took about 85 s. Many solution lines came out nearly correct (e.g. `=-48e^{-4}+16e^{-2}-4e^{-4}+4e^{-2}`, `\int xdx=\frac{1}{2}x^{2}+C`, `\sqrt{x}=t`). Errors included about 8 false detections of Japanese text or circled numbers as inline math, two lines merged into one box through wavy underlines or large brackets, and small-glyph misreadings (`e^{-4}` → `e^{-i}`, subscript `1` → `!`). False boxes are excluded or deleted in the viewer; missed formulas are added by dragging.
 
-## モデルの大きさの比較（2026-11-19）
+## Model size comparison (2026-11-19)
 
-ユーザーの指示で、UniMERNetの大きいモデルを試した。どちらもApache-2.0（Hugging Faceの表示）。重みは `models/`（Git管理外）に置き、SHA-256を配布元のLFSハッシュと照合した。
-
-| モデル | 重み | リビジョン | SHA-256 |
+| Model | Weights | Revision | SHA-256 |
 | --- | --- | --- | --- |
-| tiny（既定） | 430MB | `3f09ac4b…` | `6f760862…`（上の表） |
-| small | 810MB | `82cb8544…` | `fa54b0a8126bb60060bc90818ce20a5ca1b5dd5d7da5c0983579f5c3a2cc90ea` |
-| base | 1.3GB | `af898d48…` | `16cd0891233cfee3c11215a7b87306f160f7e7f3f52091a6253751c149a8c180` |
+| tiny | 430 MB | `3f09ac4b…` | `6f760862…` (above) |
+| small | 810 MB | `82cb8544…` | `fa54b0a8126bb60060bc90818ce20a5ca1b5dd5d7da5c0983579f5c3a2cc90ea` |
+| base | 1.3 GB | `af898d48…` | `16cd0891233cfee3c11215a7b87306f160f7e7f3f52091a6253751c149a8c180` |
 
-**測定の条件**: 実教材（スキャン2ページ）の、1行の式11件。正解は私が目視で書いた。同じ矩形・同じ後処理（行分割、崩れた出力の読み直し、整形）で、切り出し解像度を150・200・300 dpiに変えて比べた。CPU（M1・8GB）。
+Same 11 formulas, same rectangles and post-processing, crops at 150 / 200 / 300 dpi, CPU:
 
-| モデル | 読み込み | 1式あたり | ワーカーのメモリ | 自動判定の一致（完全 / 表記の違いを許す、200 dpi） | 文字列の類似度（200 dpi） |
+| Model | Load | Per formula | Worker memory | Auto-judged match (exact / allowing notation differences, 200 dpi) | String similarity (200 dpi) |
 | --- | --- | --- | --- | --- | --- |
-| tiny | 15秒 | 0.85秒 | 約440MB | 6 / 7 | 0.935 |
-| small | 18秒 | 1.2秒 | 約800MB | 5 / 5 | 0.931 |
-| base | 28秒 | 1.9秒 | 約1250MB | 7 / 8 | 0.956 |
+| tiny | 15 s | 0.85 s | ~440 MB | 6 / 7 | 0.935 |
+| small | 18 s | 1.2 s | ~800 MB | 5 / 5 | 0.931 |
+| base | 28 s | 1.9 s | ~1250 MB | 7 / 8 | 0.956 |
 
-解像度ごとの「表記の違いを許す一致」は、tinyが6 / 7 / 4（150 / 200 / 300 dpi）、smallが4 / 5 / 5、baseが5 / 8 / 7。**どのモデルも200 dpiが最も良かった。**
+Matches allowing notation differences by resolution (150 / 200 / 300 dpi): tiny 6 / 7 / 4, small 4 / 5 / 5, base 5 / 8 / 7. **200 dpi was best for every model.**
 
-**人の目で見た結果（200 dpi）**: 空白・書体・間隔だけの違いは正しいとみなし、数学的に違うものだけを誤りとして数えた。
+**By inspection (200 dpi)**, counting only mathematically different readings as errors:
 
-| モデル | 数学的に正しい | 本当の誤り |
+| Model | Mathematically correct | Actual errors |
 | --- | --- | --- |
-| tiny | 9 / 11 | `e^{-4}` を `e^{-1}`、`+` を `\pm`、`e^{-t}` を `e^{-\prime}` |
-| small | 7 / 11 | 積分の上端・下端の取り違え3件（1、`\prime`）、先頭に `\Big|` が付く |
-| base | 9 / 11 | 下端の `4` を `1`、波線の印を `\underbrace` と読む |
+| tiny | 9 / 11 | `e^{-4}` → `e^{-1}`, `+` → `\pm`, `e^{-t}` → `e^{-\prime}` |
+| small | 7 / 11 | three swapped integration limits (1, `\prime`), a leading `\Big|` |
+| base | 9 / 11 | lower limit `4` → `1`, a wavy underline read as `\underbrace` |
 
-- **大きいモデルで、はっきり良くなったとは言えない。** baseはtinyと同数（9 / 11）で、誤りの種類が違う。smallはtinyより悪かった。1式の差が約9ポイントで、標本は11式なので、差は誤差の範囲。
-- baseは、完全一致が1件多い（表記が教材に近い）が、2.2倍遅く、メモリは約2.9倍。
-- **tinyとbaseの読み取りを突き合わせると、有用な手がかりになる。** 2つが一致した7式はすべて正解、食い違った4式（`a2`・`a3`・`a4`・`q5`）はすべて本当の誤りを含んでいた。見逃しは0件。ただし、標本が小さく、判定も私なので、傾向を示すだけ。
-- 以前の記録（tinyで目視5〜6 / 11）より今回のtinyが良いのは、その後の後処理の改善（空白だけの行の除去、崩れた出力の読み直し、罫線の消去など）と、解像度を200 dpiにしたため。
+- Larger models were not clearly better on this sample: base tied tiny with different errors; small was worse. One formula is about 9 points, so the differences are within noise.
+- **Comparing tiny and base is informative:** the 7 formulas where they agreed were all correct, and the 4 where they disagreed all contained a real error — no misses on this sample. This motivated the "needs review" flag below.
 
-**切り替え方**: 環境変数 `PLO_UNIMERNET_DIR` を指定する（既定は `models/unimernet_tiny`）。例: `PLO_UNIMERNET_DIR=models/unimernet_base`。
+## "Needs review": cross-checking two models (2026-11-19)
 
-**容量**: 2モデルの取得で、空きは6.9GBから約2.9GBになった。停止基準の4GBを下回ったので、これ以上の取得はしない。使わないモデルは、`models/` から消せる（再取得できる）。
+The primary and a second model read each box with the same procedure; **formulas whose readings differ mathematically are flagged** (`--verify`, judged by `recognize/verify.py`). Differences that do not count: font commands (`\textit`, `\mathrm`, …), spacing (`\,`, `\ `, `~`, …), bracket sizes (`\left`, `\Big`, …), `\dfrac` vs `\frac`, `\to` vs `\rightarrow`, `\operatorname{lim}` vs `\lim`, `\prime` vs `'`, alternative vertical bars, `\ge` vs `\geq`, punctuation-only lines.
 
-## 「要確認」の印: 2モデルの突き合わせ（2026-11-19）
+**11 labelled formulas (real pipeline, 200 dpi, tiny primary / base verifier)**
 
-tiny（主）とbase（検証用）で同じ枠を同じ手順で読み、**数学的に食い違った式に印を付ける**（`--verify`）。判定は `recognize/verify.py`。次の違いだけを、食い違いに数えない: 書体の指定（`\textit`・`\mathrm` など）、間隔（`\,`・`\ `・`~` など）、括弧の大きさ（`\left`・`\Big` など）、`\dfrac`と`\frac`、`\to`と`\rightarrow`、`\operatorname{lim}`と`\lim`、`\prime`と`'`、縦線の別の書き方、`\ge`と`\geq`、句読点だけの行。
-
-**実教材の正解つき11式（実際のパイプライン、200 dpi）**
-
-| 項目 | 結果 |
+| Item | Result |
 | --- | --- |
-| 印が付いた式 | `a2`・`a3`・`a4`・`q5`（4 / 11） |
-| 印のない式（2つが一致） | 7 / 11。**すべて正解** |
-| tiny（主）の本当の誤り | `a3`・`a4`。**どちらにも印が付いた**（見逃し0） |
-| 印が付いたが、tinyは正しかった式 | `a2`・`q5`（baseが誤り）。印は「どちらかが誤り」の意味なので、確認は無駄ではないが、主の誤りの検出としては空振り |
-| 解像度150・200・300 dpi | 3つとも、食い違いの集合が「どちらかのモデルが誤り」の集合と一致 |
+| Flagged | 4 / 11 |
+| Not flagged (models agree) | 7 / 11, **all correct** |
+| Real errors of the primary model | 2, **both flagged** (no misses) |
+| Flagged although the primary was correct | 2 (the verifier was wrong) |
+| 150 / 200 / 300 dpi | at all three, the set of disagreements equalled the set where at least one model was wrong |
 
-**自動検出した48個（同じ教材の2ページ、行ごとの枠・誤検出を含む）**: 印が付いたのは30個（判定の見直し前は32個）。そのうち行内の枠11個は、日本語の文や丸数字を式と誤検出したもので、どちらのモデルもでたらめな出力を返した（印が付くのは妥当）。残りの多くは、`_{!}`と`_{1}`、`e^{-i}`と`e^{-4}`、`^{!}`と`^{2}`のような、**本当の誤り**だった。印のなかった18個は、読み取りを画像の内容と照らして、明らかな誤りは見つからなかった（共通の付随物として、行頭の `(1)` や `\underline` を取り込んだものがある）。**個別に正解で採点したのは、正解つきの11式だけ。**
+**48 automatically detected boxes on the same spread:** 30 were flagged. 11 of them were inline boxes that were really Japanese text or circled numbers, where both models produced garbage (flagging is appropriate); most others were real errors such as `_{!}` vs `_{1}`, `e^{-i}` vs `e^{-4}`, `^{!}` vs `^{2}`. The 18 unflagged boxes showed no obvious errors when compared with the image. Only the 11 labelled formulas were scored individually.
 
-**費用**: 2ページ・48式のOCRが約259秒（tinyだけなら、2ページ・41式で約85秒）で、約3倍。メモリは、ワーカー2つ（約440MB＋約1250MB）に、数式検出が加わる。
+**Cost:** about 259 s for 2 pages / 48 boxes (vs about 85 s for tiny alone), roughly 3×; memory for two workers plus detection.
 
-**限界**
-- **2つのモデルが同じ間違い方をした式は、見逃す。** この標本では0件だったが、一般には起こりうる。
-- 標本が小さく（正解つきは11式）、判定も私が行った。
-- 難しいページでは、印が多くなる（48個中30個）。印は「間違い」ではなく「確認が必要」の意味。「次の要確認」で順に確認できる。
+**Limitations:** formulas that both models misread the same way are missed (none on this sample, but possible in general); the sample is small; difficult pages produce many flags (30 of 48). A flag means "needs checking", not "wrong".
 
+## PP-FormulaNet and engine selection (2026-11-19)
 
-## PP-FormulaNet の検証と、認識エンジンの選択（2026-11-19）
+The claim that PP-FormulaNet is more accurate was checked against public figures and local measurements.
 
-「PP-FormulaNetの方が精度がいい」という情報を、公開の評価と手元の実測で確かめた。
+**Public evaluation** (PaddleOCR documentation, PaddleX internal set, BLEU-style metric that penalizes notation differences): UniMERNet 85.91, PP-FormulaNet-S 87.00, -L 90.36, plus-S 88.71, plus-M 91.45, plus-L 92.22. The set is Paddle's own, not Japanese textbooks.
 
-**公開の評価（PaddleOCR 公式資料、PaddleX の内部評価セット。BLEU系の指標なので、LaTeXの書き方の違いに弱い）**: UniMERNet 85.91、PP-FormulaNet-S 87.00、-L 90.36、plus-S 88.71、plus-M 91.45、plus-L 92.22。公式の数字では、PP-FormulaNet のほうが高い。ただし、評価セットは Paddle 側のもので、日本語の教材ではない。
+**Local measurement (11 labelled formulas, same boxes and preprocessing, CPU)**
 
-**手元の実測（実教材の正解つき11式、同じ枠・同じ前処理、CPU）**
-
-| モデル | 200 dpi | 1式の時間 | メモリ | 大きさ |
+| Model | 200 dpi | Per formula | Memory | Size |
 | --- | --- | --- | --- | --- |
-| UniMERNet tiny | 数学的に同じ 9/11（正確一致 6/11） | 0.83秒 | 約440MB | 約430MB |
-| UniMERNet base | 9/11（正確一致 7/11） | 1.93秒 | 約1250MB | 約1.3GB |
-| PP-FormulaNet plus-M | 3/11（正確一致 2/11） | 0.70秒 | 約1050MB | 約620MB |
-| PP-FormulaNet plus-S | 1/11（正確一致 1/11） | 0.27秒 | 約580MB | 約260MB |
+| UniMERNet tiny | mathematically equal 9/11 (exact 6/11) | 0.83 s | ~440 MB | ~430 MB |
+| UniMERNet base | 9/11 (exact 7/11) | 1.93 s | ~1250 MB | ~1.3 GB |
+| PP-FormulaNet plus-M | 3/11 (exact 2/11) | 0.70 s | ~1050 MB | ~620 MB |
+| PP-FormulaNet plus-S | 1/11 (exact 1/11) | 0.27 s | ~580 MB | ~260 MB |
 
-（「数学的に同じ」は、`recognize/verify.py` の判定。plus-L・-L は容量の都合で試していない。）
+Of plus-M's 8 mismatches, 5 **dropped a leading `=`** (textbook continuation lines often start with `=`; PP-FormulaNet seems to assume a complete equation), 2 misread digits (`4` → `1`) and 1 added a trailing `.`. plus-S had more errors (`\operatorname{l o g}`, `\limits`, `\boxed{}`, duplicated `\frac`, broken subscripts). plus-L and -L were not tried (disk space).
 
-**誤りの中身**: plus-M の食い違い8式のうち、**行頭の `=` を落とした**ものが5式（教材の式は `=` から始まる続きの行が多く、PP-FormulaNetは「式全体」を読む前提のようで、行頭の `=` を落とす）。**数字の読み間違い（`4`→`1`）が2式**、文末に `.` を足したものが1式。plus-S は、`\operatorname{l o g}`（空白入り）、`\limits`、`\boxed{}`、`\frac` の重複、添字の崩れなど、plus-M より誤りが多かった。
+**Conclusion:** on this sample, PP-FormulaNet was not more accurate; it does worse on continuation lines. It remains selectable in the UI and CLI.
 
-**結論**
-- **この標本（11式、正解は私が作成）では、「PP-FormulaNetのほうが精度がいい」とは言えなかった。** 公開の数字とは逆で、教材の続きの行（`=` から始まる）で劣る。標本が小さいので、断定はしない。
-- したがって、**既定のエンジンはUniMERNet（tiny）のまま**にした。PP-FormulaNetは、画面とコマンドで選べる。
-- 実装: `recognize/ppformulanet.py`（別venv `.venv-pp` のワーカー）。空白入りの出力は `tidy_pp` で整える。モデルは PaddleOCR 3.7.0 が配布元から取得する（`PLO_PP_MODEL` で変更、既定 plus-M）。
-- 今後の使い道: UniMERNet と PP-FormulaNet は**構造が違う**ので、「要確認」の2つ目の読み取りに向く可能性がある（未検証）。
+- Implementation: `recognize/ppformulanet.py` (worker in the separate venv `.venv-pp`); spaced output is tidied by `tidy_pp`; the model is fetched by PaddleOCR 3.7.0 (`PLO_PP_MODEL`, default plus-M). License: Apache-2.0 for PaddleOCR and the models (as stated by the publisher); recheck before distribution.
 
-**導入手順**（いずれもGit管理外の `.venv-pp/`、`models/pp_cache/`）
 ```bash
-/opt/homebrew/bin/python3.12 -m venv .venv-pp
+python3.12 -m venv .venv-pp
 .venv-pp/bin/pip install --no-cache-dir paddlepaddle==3.3.1 paddleocr==3.7.0 tokenizers ftfy
-# 初回の取得（モデルは models/pp_cache/official_models/ に保存される）
 PADDLE_PDX_CACHE_HOME=$PWD/models/pp_cache PADDLE_PDX_MODEL_SOURCE=huggingface \
   .venv-pp/bin/python -c "from paddleocr import FormulaRecognition as F; F(model_name='PP-FormulaNet_plus-M')"
 ```
-ライセンスは、PaddleOCR・モデルとも Apache-2.0（配布元の表示）。配布する前に再確認する。
 
-**Mathpix（外部サービス）**: `recognize/mathpix.py`。式の画像を `mpx scs convert`（/v3/text）で送る。**同意（`--allow-external`、画面は確認ダイアログ）がなければ、送らずに止まる。** 認証情報は `mpx configure` に任せ、このプログラムは読まない・保存しない。**Mathpix自体の精度は、実教材の画像を外部に送ることになるので、ユーザーの確認なしには測っていない**（試験は、偽の `mpx` で動作だけを確かめた）。
+**Mathpix (external service):** `recognize/mathpix.py` sends formula images with `mpx scs convert` (/v3/text). **Without consent (`--allow-external`, or the confirmation dialog in the UI) nothing is sent.** Credentials are left to `mpx configure`; this program neither reads nor stores them. With approval, only 3 crops (cases other models got wrong) were sent: 2 were correct (`\int_{4}^{16}\sqrt{x}e^{-\sqrt{x}}dx`, `=-52e^{-4}+20e^{-2}=\frac{-52+20e^{2}}{e^{4}}`), 1 was misread (`\int e^{-t}dt=-e^{-t}+C` → `\partial+,\partial-=pp_{i}\partial\int`). Three formulas say nothing about a trend. Some outputs kept `\( … \)` delimiters, so delimiter stripping was strengthened (unit-tested only).
 
-**試験**: `tests/test_engines.py` 12件を追加（全体 206件合格）。同意なしでは送らないこと、`confirm_external` は真偽値 `true` のみ有効なこと、OCR実行中は切り替えないこと、重みや環境がないときの409、区切り記号の除去、出力の整形。
+## Re-comparison on 33 formulas (2026-11-19)
 
-### 参照したMarkdown
+Of the 48 automatically detected boxes on the same spread, **33 that are readable as formulas** were labelled by hand (Japanese sentences, tables, cut-off boxes and formulas containing Japanese were excluded; the two pages did not contain 50 usable formulas). Boxes are as detected, so crops include line numbers like `1)`, underlines and clipped edges. 200 dpi, same preprocessing.
 
-AI_LOG.md、MODELS.md、README.md、DESIGN.md、AGENTS.md
-
-### Mathpix の実測（2026-11-19、ユーザーの許可を得て、最小限の3式だけ送信）
-
-送ったのは、他のモデルが誤った式を含む実教材の切り抜き3枚（200 dpi）のみ。結果: 2式は正解（`\int_{4}^{16}\sqrt{x}e^{-\sqrt{x}}dx`、`=-52e^{-4}+20e^{-2}=\frac{-52+20e^{2}}{e^{4}}`。UniMERNet tiny が誤った式を含む）、1式は誤読（`\int e^{-t}dt=-e^{-t}+C` が `\partial+,\partial-=pp_{i}\partial\int` に）。**3式では、傾向も言えない。** 出力に `\( … \)` の区切りが残る事例があり、除去を強くした（実画像での再確認は、追加で送らないため未実施。単体試験のみ）。
-
-## 33式での再比較（2026-11-19、ユーザーの依頼「50式」。手元の3モデル）
-
-同じ実教材（2ページ）の自動検出した枠48個のうち、**式として読める33個**に、私が画像を見て正解を付けた（日本語の文・表・途切れた枠・日本語を含む式は除いた）。50式には、この教材の式が足りなかった（2ページしかない）。枠は自動検出のままなので、**切り抜きに行番号 `1)` や下線、端の欠けが混ざる**。200 dpi、同じ前処理。
-
-| モデル | 数学的に同じ | 行頭の `=`・文末の `.` を無視 | 所要時間 |
+| Model | Mathematically equal | Ignoring leading `=` and trailing `.` | Time |
 | --- | --- | --- | --- |
-| UniMERNet base | **24 / 33** | 24 / 33 | 189秒 |
-| PP-FormulaNet plus-M | 8 / 33 | 22 / 33 | 44秒 |
-| UniMERNet tiny | 17 / 33 | 18 / 33 | 61秒 |
+| UniMERNet base | **24 / 33** | 24 / 33 | 189 s |
+| PP-FormulaNet plus-M | 8 / 33 | 22 / 33 | 44 s |
+| UniMERNet tiny | 17 / 33 | 18 / 33 | 61 s |
 
-- **精度の順は、base > tiny。PP-FormulaNet は、行頭の `=` を落とす癖が最大の損失**（`=` を無視すれば 22/33 で、tinyより上、baseに近い）。`=` から始まる続きの行が多い教材では、そのまま使いにくい。
-- 11式のときとは順位が変わった（そのときは tiny と base が同点）。**標本が変わると順位が動く**ので、小さな標本では優劣を決めきれない。
-- tiny の誤りには、`\frac{…}{\sqrt{…}}` を勝手に足す、`1)` を取り込む、がある。base は `\underline` や `\quad` の付加が目立つ。PP は添字や積分記号の読み違い（`\iint`、`\int_{\frac{1}{2}}^{\frac{1}{2}}`）。
-- 限界: 33式、正解は私が作成、同じ2ページ。Mathpix は含めていない（外部送信の許可が最小限の3式だったため）。
-- 正解と結果は `runs/realtext/truth33.py`・`cmp33.json`（教材由来なのでGit管理外）。`cmp33.py` で再実行できる。
+- base > tiny. PP-FormulaNet's biggest loss is dropping the leading `=` (22 / 33 when ignored — above tiny, close to base), which makes it awkward for textbooks with many continuation lines.
+- The ranking differs from the 11-formula sample (where tiny and base tied): with small samples the ranking moves.
+- Typical errors: tiny adds spurious `\frac{…}{\sqrt{…}}` and picks up `1)`; base adds `\underline` or `\quad`; PP misreads subscripts and integral signs (`\iint`, `\int_{\frac{1}{2}}^{\frac{1}{2}}`).
+- Limitations: 33 formulas, hand-made ground truth, the same two pages; Mathpix not included.
 
-## 既定をUniMERNet baseに変更（2026-11-19）
+**As a result, the default engine is UniMERNet base**; tiny is available as `--backend unimernet_tiny` ("UniMERNet tiny" in the UI). Since the primary is now base, the default second model for `--verify` is the lighter tiny (`PLO_VERIFY_DIR` to change). Trade-off: base is about 3× slower than tiny and uses about 1.25 GB; pre-processing with `prepare` hides the wait.
 
-33式の試験（base 24/33、tiny 17/33、PP-FormulaNet 8/33）を受け、**既定のエンジンを UniMERNet base にした**。tiny は `--backend unimernet_tiny`（画面では「UniMERNet tiny」）で選べる。`--verify` の2つ目のモデルは、主が base になったので、既定を軽い tiny にした（`PLO_VERIFY_DIR` で変更）。代償: baseは遅く（tinyの約3倍）、メモリは約1.25GB。先にOCR（`prepare`）しておけば、開くときの待ちは増えない。
+## User interface languages (2026-11-19)
 
-## 画面の多言語化（2026-11-19）
+Japanese, English, Chinese, Spanish and Russian (`viewer/static/i18n.js`, a dictionary keyed by the Japanese strings). The translations have not been reviewed by native speakers. Error messages returned by the server are still in Japanese.
 
-日本語・英語・中国語・スペイン語・ロシア語。`viewer/static/i18n.js`（日本語の文言をキーにした辞書）。翻訳は私が作成したもので、**母語話者の確認は受けていない**。サーバーが返すエラー文は日本語のまま。Mathpixの「APIかアプリか」の選択は、仕様の確認待ちで未実装。
+## Text recognition: PaddleOCR (2026-11-19)
 
-## 日本語などの文章の認識: PaddleOCR（2026-11-19）
+UniMERNet reads formulas only; text (including Japanese) is read with PaddleOCR (PP-OCR).
 
-ユーザーの指示「PaddleOCRを導入しましょう」。UniMERNet は数式専用で文章は読めない。文章は PaddleOCR（PP-OCR）で読む。
-
-| 項目 | 内容 |
+| Item | Details |
 | --- | --- |
-| 導入 | `.venv-pp` の `paddleocr 3.7.0` を使う（新しい導入は不要）。モデルは初回に自動取得し、`models/pp_cache/official_models/` に置く（Git管理外） |
-| モデル | `PP-OCRv6_medium_det`（行の検出）と `PP-OCRv6_medium_rec`（文字認識）。`lang="japan"`（環境変数 `PLO_OCR_LANG`） |
-| 実装 | `recognize/ppocr_worker.py`（別プロセス、JSON Lines）、`recognize/textocr.py`、`prepare.process_text` |
-| 使い方 | ビューア上部の「このページの文章を認識」。文章は緑の枠（種類 `text`）になり、クリックでコピー・修正できる |
+| Installation | `paddleocr 3.7.0` in `.venv-pp`; models are fetched on first use into `models/pp_cache/official_models/` (not tracked) |
+| Models | `PP-OCRv6_medium_det` (line detection) and `PP-OCRv6_medium_rec` (recognition), `lang="japan"` (`PLO_OCR_LANG`) |
+| Implementation | `recognize/ppocr_worker.py` (separate process, JSON Lines), `recognize/textocr.py`, `prepare.process_text` |
+| Usage | "Recognize text on this page" in the viewer; text becomes green boxes (kind `text`) that can be copied and edited |
 
-**実教材（日本語の数学の参考書、1ページ、150 dpi、CPU）**: 約14〜34秒。見出し「定積分の部分積分法(2)」「(1) 1回の部分積分では求まらないので，再度，部分積分をする.」「(2) 部分積分の前に，まず置換をする.」などは正しく読めた。誤りもあった: 「例題」→「例题」（簡体字の混入）、「次の定積分を求めよ」→「次の定秸分を求めよ.」、行頭の「342」の取り込み。**個別に正解で採点していない（目視のみ）。**
+**Real document (one page of a Japanese math workbook, 150 dpi, CPU):** about 14–34 s. Headings and instructions were mostly read correctly; errors included a simplified-Chinese character for a Japanese one (例題 → 例题), a misread kanji (積 → 秸) and a stray page number at the start of a line. Not scored individually (inspection only).
 
-**数式との分担**: 数式の枠（検出済み、または検出だけ行った枠）は塗りつぶしてから文章を読む。それでも、検出されなかった数式や表の数字が、文章として混ざることがある。そのため、**日本語の文字か、英字3つ以上の連なりを含まない行は捨てる**（`looks_like_text`）。信頼度0.5未満も捨てる。
+**Division of labour with math:** formula boxes (detected, or detected only for this purpose) are whitened before reading text. Undetected formulas or table numbers can still appear as text, so lines that contain neither Japanese characters nor a run of three or more Latin letters are dropped (`looks_like_text`), as are lines with confidence below 0.5.
 
-**限界**
-- 縦書きの文章は、埋め込み位置を確認していない（横書きのみ確認）。
-- 「事前にまとめてOCR」（`prepare`・フォルダ全体のOCR）には、まだ含めていない。ビューアで1ページずつ。
-- 縦書き・ルビ・段組みの順序は、確認していない。
+**Limitations:** embedding positions for vertical text, ruby and multi-column reading order have not been checked.
 
-### 文章の埋め込み（2026-11-19）
+### Embedding text (2026-11-19)
 
-文章（種類 `text`）は、「PDFを保存」で、派生PDFに**不可視テキスト（描画モード3）**として入る。
+Text boxes are embedded into the derived PDF by "Save PDF" as **invisible text (render mode 3)**.
 
-- **フォント**: PyMuPDF 同梱のCJKフォント（Droid Sans Fallback Full、Apache-2.0）から、**使う文字だけ**を fontTools で切り出して埋め込む（Identity-H、`/W` に実際の字幅、`/ToUnicode`）。1ページ数行で、増えるサイズは数KB〜数十KB。依存に `fonttools` を追加。
-- **なぜ非埋め込みのCJKフォント（UniJIS-UCS2-H）にしなかったか**: 試作で、MuPDFは読めたが、**PDFKitの矩形選択が行末の文字を落とした**（字幅の想定が実際のフォントとずれるため）。簡体字の「题」も欠けた。サブセット埋め込みなら、字幅が正確で、どちらも通った。
-- **検証**: 外観（ピクセル差0）、構造、本文、MuPDFの抽出、PDFKitの矩形選択（macOS）のすべてが合格。**同じ文が1ページに複数回出ても可**（数式は「ページ内で1回」を条件にしているが、文章は「解答」「(1)」などが繰り返されるため、選択結果の一致だけを見る）。
-- **除外される場合**: 同梱フォントにない文字（絵文字など。`unsupported_char`）、元のPDFに文字がすでにある場所（`existing_text_conflict`、文字のあるPDFでは重複を避ける）、数式と重なる文章（数式を優先）。
-- **試験**: 実際の文字（日本語・簡体字・重複する文）を埋め込み、全検証が通ることと、選択・検索できることを確認。
+- **Font:** only the glyphs actually used are subset with fontTools from the CJK font bundled with PyMuPDF (Droid Sans Fallback Full, Apache-2.0) and embedded (Identity-H, real widths in `/W`, `/ToUnicode`). A few lines per page add a few KB to a few tens of KB. `fonttools` is a dependency.
+- **Why not a non-embedded CJK font (UniJIS-UCS2-H):** in a prototype MuPDF could read it, but **PDFKit rectangle selection dropped the last characters of lines** (assumed glyph widths differed from the real font), and a simplified-Chinese character was lost. Subset embedding has exact widths and passed both.
+- **Verification:** appearance (zero pixel difference), structure, body text, MuPDF extraction and PDFKit rectangle selection (macOS) all pass. Unlike formulas (which must appear exactly once per page), text may repeat on a page ("Solution", "(1)" …); only the selection result is compared.
+- **Exclusions:** characters missing from the bundled font (emoji, etc.: `unsupported_char`), places where the original PDF already has text (`existing_text_conflict`), text overlapping a formula (the formula wins).
 
-**実教材1ページ（OCRで読んだ文章41行）で、実際に埋め込んだ結果**: 35行を埋め込み、全検証が合格（外観0差、構造、本文、MuPDF、PDFKit）。ファイルは191,039→201,768バイト。除外6行: `too_small` 5行（記号の読み違いなどで、幅5pt前後の枠。矩形選択できない）、`unsupported_char` 1行（`−`〈U+2212〉を含む数式の断片）。
-- 最初は、PDFKitの検証が通らず、**PDFは公開されなかった**（失敗時停止）。原因は、隣り合うノイズ枠（`二` など）が選択範囲に混ざること。ノイズ枠（幅8pt・高さ6pt未満）を除いて解決した。
-- さらに、**文章の行だけ**が選択・コピーの検証に落ちたときは、その行を `copy_check_failed` として除き、残りでやり直す（最大3回）。外観・構造・本文など、ほかの検証や数式が落ちたときは、これまでどおり止める。
+**One real page (41 OCR'd lines):** 35 lines embedded, all checks passed; file size 191,039 → 201,768 bytes. Excluded: 5 `too_small` (noise boxes about 5 pt wide that cannot be rectangle-selected) and 1 `unsupported_char` (a formula fragment containing U+2212). Initially the PDFKit check failed and **nothing was published** (stop-on-failure) because adjacent noise boxes leaked into selections; boxes smaller than 8 × 6 pt are now dropped. If only text lines fail the selection check, those lines are excluded as `copy_check_failed` and the run is retried (up to 3 times); failures of any other check, or of formulas, still stop publication.
 
-## 文章と数式が混ざった領域の認識（Mathpix Snip のような挙動、2026-11-19）
+## Mixed text-and-math regions (Mathpix-Snip-like reading, 2026-11-19)
 
-ユーザーの報告: 文章と数式が混ざった領域を手で囲むと、OCRがうまくいかない。
+A hand-drawn box containing both text and formulas used to be sent to UniMERNet as a single formula image; since UniMERNet cannot read Japanese text, the output collapsed.
 
-**原因**: 手で描いた枠は、1つの数式の画像として UniMERNet に渡していた。UniMERNet は数式専用で、日本語の文章は読めず、出力が崩れる（MODELS.md の前の節）。
+**Approach** (`recognize/mixed.py`): if the region contains text, it is read in these steps:
+1. Collect the formula boxes inside the region from page-wide formula detection (cached per page).
+2. Read the region with PaddleOCR **with per-character positions**. Formula boxes that contain Japanese characters are treated as false detections and dropped.
+3. Read the remaining boxes with the selected engine. Formula-like character runs that MFD missed (no Japanese characters) are also re-read as math.
+4. Assemble text and math line by line: math as `\( … \)` when it shares a line with text, `\[ … \]` when it stands alone.
+- Regions with no text are read as math as before. The result is a box of kind `text`, source `mixed`; it can be copied, edited and re-recognized, and is embedded as text in derived PDFs.
 
-**対応**（`recognize/mixed.py`）: 領域に文章が含まれていれば、次の順に読む。
-1. 領域の数式の枠を、ページ全体の数式検出（MFD、結果は使い回す）から集める。
-2. 領域を PaddleOCR で、**文字ごとの位置つき**に読む。日本語の文字が中にある数式の枠は、誤検出（二項定理のような漢字）として捨てる。
-3. 残った枠を、選択中のエンジンで LaTeX にする。MFD が見落とした数式（日本語の文字を含まない、数式らしい文字の連なり）も、範囲を数式として読み直す。
-4. 文章と数式を、行ごとにまとめる。数式は `\( … \)`（同じ行に文章があるとき）、1行だけの数式は `\[ … \]`。
-- 数式の枠が領域の6割以上を占める、または文章がない領域は、これまでどおり数式として読む（OCRもしない。速さも変わらない）。
-- 結果は、種類 `text`・由来 `mixed` の枠になる。クリックでコピー、修正、「この枠を再認識」で読み直せる。派生PDFにも、文章として埋め込まれる。
-
-**実教材（日本語の数学の参考書）で、問題文の領域を囲んだ結果**（初回は約42秒、ほとんどはモデルの読み込み。2回目以降は数秒〜10秒）:
+**Example** (a problem statement from a Japanese workbook; first run about 42 s, mostly model loading, later runs a few seconds):
 
 ```
 次の定積分を求めよ.
 (1) \(\underline{\int_{1}^{e}x(\log x)^{2}dx}\) \((2)\quad\int_{4}^{16}\sqrt{\,x}\,e^{-\sqrt{\,x}}\,dx\) J4 (早稲田大)
 ```
 
-- 日本語の文章、番号、行内数式を、1つのテキストにできた。MFDが見落とした `(2)` の数式も、数式として読めた。
-- **残る誤り**: 数式の下線（`\underline`）の取り込み、丸数字「①」を `J4` と読む、2つの問題が同じ行に並ぶときに `(1)` と `(2)` が1行にまとまる。**個別に正解で採点はしていない（目視）。**
-- ユーザーの画像（別の教材）そのものは、私の環境にないので、試していない。同じ種類の領域（日本語の文章、番号、行内数式）で確認した。
+Japanese text, numbering and inline math came out as one text; the `(2)` formula missed by MFD was still read as math. Remaining errors: an underline captured as `\underline`, a circled number read as `J4`, and two problems on the same line merged. Not scored individually.
 
-### 続報: 行ごと数式の枠になった文章（2026-11-19）
+### Follow-up: text detected as a whole-line formula (2026-11-19)
 
-ユーザーの報告（日本語の数学の参考書、「(1) nC0²+…=2nCn」「(2) 2≦n, r=1, 2, ……, n−1 のとき, nCr=n−1Cr+n−1Cr−1」を囲んだ画像）: 「のとき」が `\sigma\}\le\frac{\varkappa}{\mathfrak{S}}` のように崩れ、文章とLaTeXの区別がついていなかった。
+On a binomial-coefficient problem, Japanese words in the middle of a line ("のとき", "when") were garbled into LaTeX. **Cause (an implementation mistake):** a shortcut skipped OCR when formula boxes covered more than 60% of the region, but MFD often boxes a whole line, including Japanese words, as one formula, so the region was wrongly treated as math-only.
 
-**原因（私の実装の誤り）**: 前の対応で、「数式の枠が領域の6割以上を占めるなら数式だけの領域とみなし、OCRを省く」という近道を入れていた。数式検出（MFD）は、行の途中の「のとき」も含めて、**行ごと1つの数式の枠**にしてしまうため、この近道で混在の判定が外れ、従来どおり数式として読まれていた。再現: 画像をPDFにして実際のモデルで実行し、同じ崩れを確認した。
+**Fixes:**
+- The shortcut was removed: OCR always checks for text first (math-only regions now take a few extra seconds).
+- A formula box containing **two or more Japanese characters** is dropped and treated as text; formula-like runs left over are re-read as math. A single character (e.g. an integral sign misread as kana) does not count.
+- "・" (U+30FB, often a misread "⋯") and "ー" (U+30FC, often a misread minus) are not counted as Japanese.
+- Formula boxes extending beyond the region are clipped to it; leading numbers such as "(1)" stay as text; separated terms (`+ ⋯ +`) are merged into one formula.
 
-**修正**
-- 近道をやめ、**常にOCRで文章の有無を見る**。文章がなければ、従来どおり数式として読む（ただし、数式だけの領域でも、OCRの分、数秒〜十数秒かかる）。
-- 数式の枠の中に**日本語の文字が2字以上**あれば、その枠は捨てて文章として扱う。残った数式らしい文字の連なりは、範囲を数式として読み直す。1字だけ（積分記号を仮名に読み違えたなど）では、文章とみなさない。
-- 「・」（U+30FB、数式の「……」を読み違えやすい）と「ー」（U+30FC、マイナスを読み違えやすい）は、日本語の文字に数えない。
-- 領域の外にはみ出した数式の枠（行頭の番号「(1)」を含む枠）は、領域の中だけに切り詰める。行頭の番号は文章として残す。離れた項（`+ ⋯ +`）は1つの数式にまとめる。
+After the fix "のとき，" was separated as text. Remaining errors: prefix subscripts such as `_{n}C_{r}` read as `\mathrm{\Omega}_{n}\mathrm{C}_{r}` (a UniMERNet limitation, common on short crops), a formula split in the middle of a line, a frame line captured as `|`, a fragment of a kana captured as `\sigma`. Inspection only; first run about 50 s (mostly model loading).
 
-**画像からの再現での結果**（教科書の文字の大きさに合わせて、PDFにして実行）:
-```
-\(|_{n}C_{0}^{~2}+_{n}C_{1}^{~2}+_{n}C_{2}^{~2}+_{n}C_{3}^{~2}+\cdots+\) \(n\mathbb{C}_{n}^{\;2}=\;_{2n}\mathbb{C}_{n}\)
-\(12\leq n,\ r=1,\ \ 2,\ \cdots,\ n-1\ \sigma\) のとき， \(\mathrm{\Omega}_{n}\mathrm{C}_{r}=_{n-1}\mathrm{C}_{r}+\mathrm{\Omega}_{n-1}\mathrm{C}_{r-1}\)
-```
-- 「のとき，」は文章として分けられた。
-- **残る誤り**: 前置の添字 `_{n}C_{r}`（nCr）を `\mathrm{\Omega}_{n}\mathrm{C}_{r}` と読む（UniMERNetの限界。短い切り抜きで出やすい）、行の途中で数式が2つに割れる、`|`（私の再現では、画像に写っていたオレンジの枠線）の取り込み、`n-1` の後ろの `\sigma`（「の」の一部の取り込み）、「2≦n」の前に `1` が付く。**採点はしておらず、目視。**
-- 所要時間は、初回約50秒（ほとんどモデルの読み込み）。
+### Follow-up: line breaks and layout (2026-11-19)
 
-### 続報: 改行・レイアウトの把握（2026-11-19）
+On a polynomial-division problem, the output had no line structure and text and formulas were out of order.
 
-ユーザーの報告（「多項式の除法」の問題文を囲んだ画像）: 結果が `(次(13 \[(zx+\iota x+\mathsf{o})\div(x+\mathsf{o}) …\] の \((2x^{3}+7x^{2}+5)\div(x+3)\) 式を \(\div xl\) についての多項式とみて，(2商 …` のように、**行の区別がなく、文章と数式の順序も入れ替わっていた**。
+**Causes:** lines were grouped by vertical overlap while adding elements one by one, so tall formula boxes and superscripts chained separate lines together; boxes spanning several lines were read as one formula; detection sometimes boxed only one of two side-by-side columns "(1) …  (2) …"; OCR sometimes merged ")" and "(" of adjacent numbers into one word ")(", pulling numbers into formulas.
 
-**原因（私の実装）**
-- 行を「縦の重なり」で、要素を順に足しながらまとめていた。背の高い数式の枠や上付き文字が混ざると、別の行が連鎖してつながった。
-- 複数の行にまたがる枠を、1つの数式として読んでいた（隣の行が混ざって崩れる）。
-- 数式検出の枠が、横並びの「(1) …  (2) …」の一方の段しか囲まないことがあった。
-- OCRが、番号の「)」と次の「(」を1つの単語「)(」にすることがあり、番号が数式に入った。
+**Fixes** (`recognize/mixed.py`):
+1. **Lines are determined from horizontal bands of the region image** (gaps without ink, using the existing line splitter). Words and formula boxes go to the line containing their vertical centre; boxes spanning several lines are split per line and clipped to the line height.
+2. For display-formula boxes, words on the same line are split into **columns**, and columns touching the box are read as one formula including words outside the box; columns containing Japanese stay text.
+3. Leading numbers "(1)", "①" are split off as text **even inside a word** (")("); separate "(", "1", ")" are merged into "(1)".
+4. A single Latin letter inside Japanese text ("x について…") becomes the variable `\(x\)`. Very short inline formulas (three characters or fewer) use the OCR characters directly, because UniMERNet tends to pick up neighbouring glyphs.
 
-**修正**（`recognize/mixed.py`）
-1. **行は、領域の画像の横帯（インクのない隙間）から決める**（既存の行分割）。単語・数式の枠は、縦の中心が入る行に入れる。枠が複数の行にまたがるときは、行ごとの枠に分ける。数式の枠は、行の上下に収めて読む。
-2. 表示数式の枠は、同じ行の単語を**段（横並び）に分け**、枠に触れる段を、枠の外の単語も含めて1つの数式にする。日本語が入る段は文章のまま。
-3. 行頭の番号「(1)」「①」は、**単語の途中（「)(」）でも切って**文章にする。ばらばらの「(」「1」「)」は「(1)」にまとめる。
-4. 日本語の文のなかの英字1文字（「x についての」）は、変数として `\(x\)` にする。短い（3字以内の）行内数式は、UniMERNetが隣の文字を拾うので、OCRの文字をそのまま使う。
+**Result** (real model, first run about 50 s):
 
-**結果**（ユーザーの画像から作ったPDFで、実際のモデルを実行。初回約50秒、ほとんどモデルの読み込み）:
 ```
 次の式を \(x\) についての多項式とみて、 商と余りを求めよ.
 (1) \((2x^{3}+7x^{2}+5)\div(x+3)\) (2) \((2x^{3}-x^{2}-2x+1)\div(x^{2}+4)\)
 (3) \((x^{4}+x^{2}y^{2}+y^{4})\div(x^{2}+xy+y^{2})\)
 ```
-3行（問題文、(1)と(2)の横並び、(3)）の区別と、文章・数式の振り分けが正しくできた。**この1例を目視で確認しただけで、採点はしていない。**
-前の画像（nCr の問題）は、前置の添字の誤読（UniMERNet）、行の途中での数式の割れ、`\sigma` の混入が残る。
+
+The three lines (instruction, (1) and (2) side by side, (3)) and the split between text and math are correct. This single example was checked by inspection only. The binomial example still shows the prefix-subscript misreading, a split formula and a stray `\sigma`.
+
+## Non-PDF documents, Snip and handwriting (2026-11-25)
+
+- Snip uses the same pipeline as boxes in the viewer: auto mode reads "text + inline math" (detection → mixed recognition), falls back to math, then to text. Images are treated as 200 dpi (one pixel = 1/200 inch), the same resolution used for crops.
+- Photos of handwritten notes are rotated according to EXIF before recognition. UniMERNet's training data (UniMER-1M) includes handwritten formulas, but **handwriting accuracy has not been measured in this project**. Handwritten Japanese text read by PaddleOCR is expected to be noticeably less accurate than print.
+- For Markdown, plain text and LaTeX sources that could not be compiled, the text layer contains the source, so region Snips return it without OCR (exact).

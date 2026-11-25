@@ -1,32 +1,33 @@
-# ロードマップ
+# Roadmap
 
-| 順番 | 成果と次へ進む条件 | コミット例 |
+| Step | Deliverable and exit condition | Example commit |
 | --- | --- | --- |
-| 0 | 設計、合成サンプル生成、期待式と領域、元PDF・描画比較 | `test: add synthetic PDF fixtures and appearance checks` |
-| 1 | Mathpixの計4ジョブとコピー表。API条件が未入手なら未実施を記録し、合成データでローカル開発を進める | `feat: add Mathpix overlay validation workflow` |
-| 2a | 手動矩形からUniMERNet認識。MacのCPUで動作時間、メモリと期待式の照合を記録 | `feat: recognize formula crops with UniMERNet` |
-| 2b | ページ全体から検出、座標変換、重複抑制。期待矩形とのIoUと検出漏れ・誤検出を報告 | `feat: detect and map formula regions` |
-| 2c | 既知のLaTeXを用いて両方式を実装、コピーと構造保持を比較して既定を決める | `feat: compare invisible text and ActualText embedding` |
-| 2d | CLIの通し試験、失敗・割り込み・再開試験、ほかのアプリからの呼び出し例 | `feat: add verified PDF processing CLI` |
+| 0 | Design, synthetic sample generation, expected formulas and regions, original-vs-rendering comparison | `test: add synthetic PDF fixtures and appearance checks` |
+| 1 | Four Mathpix jobs and a copy table. If API terms are unavailable, record it as not done and continue locally with synthetic data | `feat: add Mathpix overlay validation workflow` |
+| 2a | UniMERNet recognition from manual rectangles. Record CPU run time, memory and matches against expected formulas on a Mac | `feat: recognize formula crops with UniMERNet` |
+| 2b | Whole-page detection, coordinate mapping, duplicate suppression. Report IoU against expected rectangles, misses and false positives | `feat: detect and map formula regions` |
+| 2c | Implement both embedding methods with known LaTeX, compare copying and structure preservation, choose the default | `feat: compare invisible text and ActualText embedding` |
+| 2d | End-to-end CLI tests; failure, interruption and resume tests; example of calling from another application | `feat: add verified PDF processing CLI` |
+| 3 | Non-PDF documents (EPUB, DjVu, images, Markdown, LaTeX), Snip (screen, page region, images, handwriting), Snip dashboard, Mathpix-style customizable shortcuts, menu bar agent | `feat: multi-format documents, Snip OCR, launcher apps` |
 
-各段階で差分と対象テストを確認してローカルコミット。テスト不合格時は状態を報告し、合格扱いのコミットを作らない。機密・生成PDF・ログ・重みはGit管理外とし、合成サンプルの生成手順と期待値は管理する。
+Commit locally at each step after reviewing the diff and the relevant tests. If tests fail, report the state and do not create a commit that claims success. Sensitive data, generated PDFs, logs and model weights stay out of Git; the generation procedure and expected values of the synthetic samples are tracked.
 
-## 夜間の初回運用
+## First unattended (overnight) run
 
-初回は合成サンプルで1ページの試走を済ませてから実行。暫定上限は全体6時間、ページ20枚、ワーカー1、再試行2回、Mathpix新規受付4件。上限は実測後に調整する。認証・権限・費用枠・モデル・出力先・空き容量を起動前に確認。成功条件を判定できないときはレビュー待ちの状態で止める。
+Run a one-page trial on synthetic samples first. Provisional limits: 6 hours overall, 20 pages, 1 worker, 2 retries, 4 new Mathpix jobs; adjust after measuring. Before starting, check authentication, permissions, budget, models, output location and free disk space. If success cannot be determined, stop in a "needs review" state.
 
-期限や割り込みでは新規処理を止めて現ページに短い終了猶予を与え、必要なら子プロセスを終了する。429と一時的な通信エラーは、再送が安全な取得・ポーリングに限り上限付きで再試行する。認証、仕様違反、容量不足、描画差、原本変更は停止理由にする。翌朝の概要には所要時間、成功・除外件数、失敗理由、再開条件、出力先、コミットIDを含める。ビューア操作ができない時間帯はGUI判定を未実施として残す。
+On deadline or interruption, stop accepting new work, give the current page a short grace period, and terminate child processes if needed. HTTP 429 and transient network errors are retried with a cap, only for requests that are safe to resend (fetching and polling). Authentication failures, spec violations, lack of disk space, rendering differences and changes to the original are stop conditions. The morning summary includes elapsed time, success and exclusion counts, failure reasons, resume conditions, output locations and commit IDs. GUI checks that cannot be performed unattended are recorded as not done.
 
-## Claude Codeによる実装計画（2026-11-18）
+## Implementation plan (2026-11-18)
 
-| 段階 | 内容 | 主な技術 |
+| Step | Content | Main technology |
 | --- | --- | --- |
-| 0 | パッケージ骨格、合成フィクスチャ（ベクター・画像化、回転90/180/270、非ゼロCropBox、数式なし、本文との重なり、長いLaTeX・逆斜線）、期待式・矩形JSON、原本ハッシュと外観検査 | Python 3.12 `.venv`、PyMuPDF、numpy、pytest |
-| 2c | 既知LaTeXでの埋め込み2方式（不可視テキスト `3 Tr`、`/Span /ActualText`）、領域抽出とPDFKitでのコピー比較 | pikepdf（コンテンツストリーム追記）、Swift PDFKit |
-| 2d | `process_pdf()` とCLI。出力の衝突拒否、一時ファイル→検証→リンクで公開、失敗時は非公開、SIGINT/SIGTERM、レポートJSON | 標準ライブラリ |
-| V | ローカルビューア。検出枠の表示、クリックでLaTeXコピー、修正・保存（OCR原文と修正版を保持）、枠の引き直しと再認識、派生PDF保存 | `http.server`（127.0.0.1限定、トークン付き）、素のJS |
-| 2a | UniMERNetによる切り出し認識（CPU、小さい入力から）。モデルは `models/` に置きGit管理外。空き容量が4GB未満なら導入を止める | PyTorch、UniMERNet |
-| 2b | MinerU結果の取り込み（ページ・矩形・LaTeX）、座標変換と重複抑制、期待矩形とのIoU評価 | MinerUの出力JSON |
-| 1 | Mathpix検証ワークフローのドライラン。実送信は個別承認後 | 既存 `mpx` |
+| 0 | Package skeleton; synthetic fixtures (vector and rasterized, rotation 90/180/270, non-zero CropBox, no formulas, overlap with body text, long LaTeX and backslashes); expected formula/rectangle JSON; original hash and appearance checks | Python 3.12 `.venv`, PyMuPDF, numpy, pytest |
+| 2c | Two embedding methods with known LaTeX (invisible text `3 Tr`, `/Span /ActualText`); region extraction and copy comparison in PDFKit | pikepdf (content stream append), Swift PDFKit |
+| 2d | `process_pdf()` and CLI: refuse output collisions, temp file → verify → publish by link, nothing published on failure, SIGINT/SIGTERM, JSON report | Standard library |
+| V | Local viewer: show detected boxes, click to copy LaTeX, edit and save (keeping both the raw OCR and the edited version), redraw and re-recognize boxes, save the derived PDF | `http.server` (127.0.0.1 only, token), plain JS |
+| 2a | Crop recognition with UniMERNet (CPU, small inputs first). Models live in `models/`, outside Git. Stop installing if free space is below 4 GB | PyTorch, UniMERNet |
+| 2b | Import MinerU results (page, rectangle, LaTeX), coordinate mapping, duplicate suppression, IoU against expected rectangles | MinerU output JSON |
+| 1 | Dry run of the Mathpix validation workflow; real submissions only after individual approval | existing `mpx` |
 
-各段階はテスト合格後にコミットする。PyMuPDF（AGPL）とモデルのライセンスは、配布前に再確認する。
+Each step is committed after its tests pass. Licenses of PyMuPDF (AGPL) and the models are rechecked before distribution.

@@ -1,10 +1,10 @@
-# Mathpix 検証記録
+# Mathpix validation record
 
-## 公式仕様の確認（2026-11-18）
+## Official specification (checked 2026-11-18)
 
-[mmd.overlay.pdf の変換オプション](https://docs.mathpix.com/reference/shared-types#conversion-options-for-mmdoverlaypdf) に、任意の真偽値 `math_latex_layer` が掲載されている。既定値は `false`。`true` は変換が描画する数式テキストを読み上げ表現から認識済みLaTeXに切り替える。タグ付き出力の `/Formula` の読み上げ用代替は維持される。既存のPDFテキストの扱いはサンプルで確認する。
+The [conversion options for mmd.overlay.pdf](https://docs.mathpix.com/reference/shared-types#conversion-options-for-mmdoverlaypdf) list an optional boolean `math_latex_layer`, default `false`. `true` switches the math text drawn by the conversion from a spoken-math representation to the recognized LaTeX. The spoken alternative for `/Formula` in tagged output is kept. How existing PDF text is handled has to be checked on samples.
 
-[Accessible PDF](https://docs.mathpix.com/guides/accessible-pdf) と [PDF API](https://docs.mathpix.com/reference/post-v3-pdf) に従い、`POST /v3/pdf` の multipart に `file` と以下の `options_json` を渡す。認証ヘッダーは [認証仕様](https://docs.mathpix.com/reference/authentication) に従う。
+Following [Accessible PDF](https://docs.mathpix.com/guides/accessible-pdf) and the [PDF API](https://docs.mathpix.com/reference/post-v3-pdf), `POST /v3/pdf` receives `file` and the following `options_json` as multipart. Authentication headers follow the [authentication spec](https://docs.mathpix.com/reference/authentication).
 
 ```json
 {
@@ -15,57 +15,53 @@
 }
 ```
 
-PDF IDを取得し、`GET /v3/pdf/{pdf_id}` と変換ステータスで完了を確認してから `GET /v3/pdf/{pdf_id}.mmd.overlay.pdf` で別名保存する。変換固有のエラーも確認する。キーは環境変数または承認済みの秘密管理機構から読み、ログやコミットに含めない。
+Get the PDF ID, wait for completion with `GET /v3/pdf/{pdf_id}` and the conversion status, then save `GET /v3/pdf/{pdf_id}.mmd.overlay.pdf` under a separate name. Check conversion-specific errors too. Keys are read from environment variables or an approved secret store and never appear in logs or commits.
 
-## A/B実測
+## A/B measurement plan
 
-1. 同一内容の合成PDFを2種類用意する。通常テキストを含むベクターPDFと、同じページを画像化したPDF。インライン数式、分数、根号、複数行の表示数式、数式なしページを入れ、期待LaTeXと領域を別ファイルに記録する。
-2. 各PDFで `math_latex_layer=false/true` の計4件を比較する。初回は既定のタグ付き出力で固定する。外部送信は合成PDFに限定し、認証と利用枠を確認できる場合だけ実施する。応答を失ったPOSTは請求やジョブの重複を避けるため自動再送しない。
-3. macOSプレビューと利用可能な別系統のビューア（Acrobat ReaderまたはChrome）で式だけを選択し、プレーンテキストに貼り付ける。周辺文を含む範囲もコピーし、欠落、二重コピー、順序、位置ずれを記録する。併せて `pdftotext` の領域抽出を実行し、CLI抽出とGUIコピーの結果を別々に保存する。
-4. 入力SHA-256とページ属性、全ページ描画差分を比較する。LaTeXの生文字列と正規化後の一致結果を両方保存。正規化は外側の数式デリミタ、改行コード、前後空白に限定し、コマンドや数式の中身を変更しない。
-5. 各セルを PASS、FAIL、未実施で記録する。ビューアとOSの版、入力種別、式ID、リクエスト条件、実際のコピー結果と差分を残す。HTTP成功だけで設定の効果を判定しない。両条件で同じ結果なら、未適用・既存文字層・認識漏れ・ビューア挙動を切り分ける。
+1. Prepare two synthetic PDFs with identical content: a vector PDF with normal text and a rasterized copy of the same pages. Include inline formulas, fractions, roots, multi-line display formulas and a page without formulas; record the expected LaTeX and regions in a separate file.
+2. Compare `math_latex_layer=false/true` for each PDF (four jobs). Fix the default tagged output for the first run. External submission is limited to the synthetic PDFs and only done when authentication and quota can be confirmed. A POST whose response was lost is not retried automatically, to avoid duplicate jobs and charges.
+3. In macOS Preview and another available viewer (Acrobat Reader or Chrome), select only the formula and paste into plain text. Also copy ranges that include surrounding text, and record omissions, duplicates, ordering and offsets. Run `pdftotext` region extraction as well and store CLI extraction and GUI copy results separately.
+4. Compare the input SHA-256, page attributes and full-page rendering differences. Store both the raw LaTeX string and the normalized comparison. Normalization is limited to outer math delimiters, line endings and surrounding whitespace; commands and formula contents are never changed.
+5. Record each cell as PASS, FAIL or not done, with viewer and OS versions, input kind, formula ID, request conditions, the actual copied text and the diff. HTTP success alone never counts as evidence that a setting worked. If both settings give the same result, separate "not applied", "existing text layer", "not recognized" and "viewer behavior".
 
-## 合成教科書での実測（2026-11-18）
+## Synthetic textbook (2026-11-18)
 
-B5相当、本文10.5pt、300 dpi、画像のみの合成教材2ページを設定オンで変換。既存のMathpix CLI設定を利用し、`accessible: true`、`math_latex_layer: true`、`language: ja` を指定。取得した出力に構造ツリーがあり、144 dpiで両ページの描画が元PDFと画素一致。原本SHA-256は変更なし。
+Two image-only synthetic pages (B5, 10.5 pt body text, 300 dpi) were converted with the setting on, using the existing Mathpix CLI configuration with `accessible: true`, `math_latex_layer: true`, `language: ja`. The output had a structure tree, both pages rendered pixel-identical to the original at 144 dpi, and the original's SHA-256 was unchanged.
 
-PDFKitの範囲選択と一時クリップボードで確認。1ページ目は表示数式2件をそれぞれLaTeXとしてコピーできた。2ページ目は2式が一つの `aligned` ブロックになり、上の式の選択で両方が返り、下の式だけでは空だった。設定オフとの比較、ベクター入力、プレビューの手動操作は未実施。
+Checked with PDFKit range selection and a temporary clipboard: on page 1, both display formulas could be copied as LaTeX. On page 2 two formulas had become one `aligned` block — selecting the upper one returned both, and selecting only the lower one returned nothing. Comparison with the setting off, vector input and manual operation in Preview were not done.
 
-出力ファイル名は `mathpix-stem-accessible-latex.pdf`。
+## Validation workflow (2026-11-18, nothing sent)
 
-## 検証ワークフローの実装（2026-11-18、送信なし）
+`alice-stem-reader mathpix-plan outputs/fixtures` prints, for the four jobs (vector / rasterized × `math_latex_layer` false / true), the `options_json` above, the input SHA-256, the `mpx scs convert` command (PDF API, without `--async`) and the post-retrieval check commands. It sends nothing and reads no credentials (verified in tests by forbidding socket connections).
 
-`pdf-latex-overlay mathpix-plan outputs/fixtures` は、ベクター・画像化 × `math_latex_layer` false/true の計4ジョブについて、上記の `options_json`、入力SHA-256、`mpx scs convert` のコマンド（PDF API、`--async` なし）、取得後の検査コマンドを出力する。送信はせず、認証情報も読まない（試験でソケット接続を禁止して確認）。
+Retrieved PDFs are evaluated with:
+- `verify-derived ORIGINAL DERIVED` — compares page attributes and pixel differences.
+- `copycheck DERIVED --formulas expected.json` — MuPDF and PDFKit copy comparison table (raw and normalized).
 
-取得したPDFは、次の2つで評価する。
-- `verify-derived 原本 派生`: ページ属性と画素差を比べる。
-- `copycheck 派生 --formulas 期待式.json`: MuPDFとPDFKitのコピー比較表を出す（生文字列と正規化後の両方）。
+## A/B measurement on the synthetic fixtures (2026-11-19)
 
-今回は送信の承認がないため、実ジョブは未実施。実施するときは、個別承認を得てから、計画の `command` を1件ずつ手で実行する。
+With explicit approval, the four `mathpix-plan` jobs were sent one at a time to the PDF API (`mpx scs convert`, without `--async`): four submissions, no retries, each finished within seconds. Input: the synthetic fixtures (6 pages, 11 formulas, Computer Modern math images). The SHA-256 of both inputs was unchanged before and after. Options: `accessible: true` and `math_latex_layer` false/true. Output in `outputs/mathpix/` (not tracked).
 
-## 合成フィクスチャでのA/B実測（2026-11-19）
-
-ユーザーの承認を得て、`mathpix-plan` の4ジョブを PDF API（`mpx scs convert`、`--async` なし）へ1件ずつ送信した。送信は計4件で、再送はしていない。いずれも数秒で完了した。入力は合成フィクスチャ（6ページ、11式、Computer Modern の数式画像）。両入力のSHA-256は送信の前後で一致した。オプションは `accessible: true` と `math_latex_layer` false/true。出力は `outputs/mathpix/`（Git管理外）。
-
-| 入力 | 設定 | ページ属性 | 画素差（72・144 dpi） | タグ付き | PDFKit矩形選択で得られる文字列 |
+| Input | Setting | Page attributes | Pixel difference (72 / 144 dpi) | Tagged | Text obtained by PDFKit rectangle selection |
 | --- | --- | --- | --- | --- | --- |
-| ベクター | オフ | 一致 | **あり**（144 dpiで1ページ目14,650画素など。目視では同じで、文字の縁のずれ程度） | あり | 読み上げ表現（`StartFraction negative b …`） |
-| ベクター | オン | 一致 | **あり**（同上） | あり | 表示数式は `\[ … \]` 付きのLaTeX |
-| 画像化 | オフ | 一致 | なし | あり | 読み上げ表現 |
-| 画像化 | オン | 一致 | なし | あり | 表示数式は `\[ … \]` 付きのLaTeX |
+| Vector | off | identical | **yes** (e.g. 14,650 pixels on page 1 at 144 dpi; visually identical, glyph-edge shifts) | yes | spoken math (`StartFraction negative b …`) |
+| Vector | on | identical | **yes** (same) | yes | display math as LaTeX wrapped in `\[ … \]` |
+| Rasterized | off | identical | none | yes | spoken math |
+| Rasterized | on | identical | none | yes | display math as LaTeX wrapped in `\[ … \]` |
 
-**設定オン**で、式の見た目の矩形を上下左右15%広げて選択し、外側の区切りと空白を除いて期待値と比べた結果（両入力とも同じ）:
+With the setting **on**, selecting each formula's visual rectangle enlarged by 15% on every side and comparing after removing outer delimiters and whitespace (same result for both inputs):
 
-- 表示数式7件（回転0/90/180/270と非ゼロCropBoxを含む）: 5件が完全一致。残る2件も数学的には同じ内容（`d x` と `\,dx`、`\rightarrow` と `\to`）。
-- 行内数式 `a^{2}+b^{2}=c^{2}`: LaTeXにならない。ベクターでは置換文字（U+FFFC）、画像化では平文の `a 2 +b 2 =c 2` だった。
-- 本文と重なる式 `\alpha+\beta=\gamma`: LaTeXとして取り出せなかった。
-- ページ境界で切れた式: 何も取れなかった。
+- 7 display formulas (including rotation 0/90/180/270 and a non-zero CropBox): 5 exact matches; the other 2 were mathematically identical (`d x` vs `\,dx`, `\rightarrow` vs `\to`).
+- Inline formula `a^{2}+b^{2}=c^{2}`: not LaTeX — a replacement character (U+FFFC) for vector input, plain `a 2 +b 2 =c 2` for rasterized input.
+- Formula overlapping body text `\alpha+\beta=\gamma`: could not be extracted as LaTeX.
+- Formula clipped at the page edge: nothing was extracted.
 
-**分かったこと**
-- LaTeXの文字層は、見た目の式より横に広い（`\[` と `\]` を含む）。式の見た目どおりに矩形で選ぶと、端の文字が欠ける。広げずに選んだ場合は、先頭が `[ x=…` のように `\` が欠けた。以前の実教材で見た「先頭の `\` の欠け」と同じ現象と考えられる。
-- 設定オフでは、式は読み上げ表現になる。`math_latex_layer` の効果は確認できた。
-- ベクター入力では、見た目はほぼ同じだが画素は一致しない。本プロジェクトの初期基準（画素差ゼロ）では不合格。画像化入力では一致した。
+**Findings**
+- The LaTeX text layer is wider than the visible formula (it includes `\[` and `\]`). Selecting exactly the visible rectangle loses characters at the edges; without enlargement the result started like `[ x=…` with the `\` missing — the same "missing leading backslash" seen earlier on real documents.
+- With the setting off, formulas become spoken math, so the effect of `math_latex_layer` is confirmed.
+- For vector input the output is visually the same but not pixel-identical, which fails this project's initial criterion (zero pixel difference). Rasterized input matched.
 
-**本プロジェクトの方式との比較**（同じフィクスチャ、既知のLaTeX）: 不可視テキストの埋め込みは、両入力で画素差ゼロ。PDFKitでは、式の見た目どおりの矩形で、行内数式を含む全件のLaTeXが取れる。ただし、LaTeXそのものの正しさは認識器（UniMERNetなど）か手動修正に依存する。
+**Compared with this project's method** (same fixtures, known LaTeX): invisible-text embedding gives zero pixel difference for both inputs, and PDFKit returns the LaTeX for every formula, including inline ones, when selecting the visible rectangle. The correctness of the LaTeX itself still depends on the recognizer (UniMERNet etc.) or manual correction.
 
-**未実施**: macOSプレビューでの手動のドラッグ選択。Acrobat ReaderとChromeでのコピー。実教材での比較。
+**Not done:** manual drag selection in macOS Preview; copying in Acrobat Reader and Chrome; comparison on real documents.

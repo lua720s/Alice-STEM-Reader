@@ -1,9 +1,9 @@
-# 開発の記録
+# Development notes
 
-設計・評価・検証の記録です。利用方法は、リポジトリ直下の [README](../README.md) を見てください。
+Design, evaluation and validation records. For installation and usage, see the [README](../README.md) at the repository root.
 
-- [要件と合格基準](REQUIREMENTS.md)
-- [設計（モジュール、PDF への埋め込み、ビューア、PDF 以外の資料と Snip）](DESIGN.md)
-- [モデルと認識の評価（UniMERNet・MFD・PP-FormulaNet・PaddleOCR・Mathpix）](MODELS.md)
-- [Mathpix との比較検証](MATHPIX_VALIDATION.md)
-- [ロードマップ](ROADMAP.md)
+- [Requirements and acceptance criteria](REQUIREMENTS.md)
+- [Design (modules, PDF embedding, viewer, non-PDF documents, Snip, shortcuts)](DESIGN.md)
+- [Models and recognition: evaluation record (UniMERNet, MFD, PP-FormulaNet, PaddleOCR, Mathpix)](MODELS.md)
+- [Mathpix validation record](MATHPIX_VALIDATION.md)
+- [Roadmap](ROADMAP.md)
