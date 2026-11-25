@@ -123,7 +123,7 @@ def test_http_security(server):
     assert _req(base + "/api/doc", token="wrong")[0] == 401
     assert _req(base + "/api/doc", token=token, host="evil.example:80")[0] == 403
     st, body, hdr = _req(base + "/")
-    assert st == 200 and b"Alice STEM PDF Reader" in body and "frame-ancestors 'none'" in hdr["Content-Security-Policy"]
+    assert st == 200 and b"Alice STEM Reader" in body and "frame-ancestors 'none'" in hdr["Content-Security-Policy"] and "http" not in hdr["Content-Security-Policy"]  # 外部への通信を許さない
     assert _req(base + "/../pyproject.toml")[0] == 404
     assert _req(base + "/session.py")[0] == 404
     assert _req(base + "/api/formulas/..%2Fx/recognize", token=token, method="POST")[0] in (400, 404)

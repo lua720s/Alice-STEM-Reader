@@ -219,13 +219,17 @@ def process_document(pdf_path, fs: FormulaSet, *, detector, backend, lock=None,
 
 
 # ---------------------------------------------------------------- 事前処理（CLI）
-def collect_pdfs(paths, recursive=True) -> list[Path]:
+def collect_pdfs(paths, recursive=True, all_formats=False) -> list[Path]:
+    """PDF（all_formats なら、ビューアで開ける全形式: EPUB・DjVu・画像・Markdown・LaTeX など）を集める。"""
+    from .docformats import is_supported
+
+    ok = is_supported if all_formats else (lambda x: Path(x).suffix.lower() == ".pdf")
     out: list[Path] = []
     for p in map(Path, paths):
         if p.is_dir():
-            it = p.rglob("*.pdf") if recursive else p.glob("*.pdf")
-            out += sorted(x for x in it if x.is_file() and not x.name.startswith("."))
-        elif p.is_file() and p.suffix.lower() == ".pdf":
+            it = p.rglob("*") if recursive else p.glob("*")
+            out += sorted(x for x in it if x.is_file() and not x.name.startswith(".") and ok(x))
+        elif p.is_file() and ok(p):
             out.append(p)
     seen, uniq = set(), []
     for p in out:
@@ -237,8 +241,12 @@ def collect_pdfs(paths, recursive=True) -> list[Path]:
 
 
 def prepare_one(pdf: Path, *, detector, backend, library=None, should_stop=lambda: False,
-                max_pages=None, log=print, verifier=None) -> dict:
-    """1つの PDF を事前処理する。原本は読むだけ。"""
+                max_pages=None, log=print, verifier=None, source: Path | None = None) -> dict:
+    """1つの PDF を事前処理する。原本は読むだけ。
+
+    PDF 以外（EPUB・画像・DjVu など）は、先に docformats.as_pdf で変換した PDF を渡し、元のファイルを source に渡す。
+    """
+    source = Path(source) if source else Path(pdf)
     pf = pdfcheck.preflight(pdf)
     if not pf.ok:
         return {"pdf": str(pdf), "state": "skipped", "reason": "; ".join(pf.reasons)}
@@ -258,8 +266,8 @@ def prepare_one(pdf: Path, *, detector, backend, library=None, should_stop=lambd
             npages = doc.page_count
             doc.close()
             meta = read_meta(d)
-            paths = list(dict.fromkeys([*meta.get("source_paths", []), str(pdf.resolve())]))
-            meta.update({"name": pdf.name, "input_sha256": sha, "pages": npages, "source_paths": paths,
+            paths = list(dict.fromkeys([*meta.get("source_paths", []), str(source.resolve())]))
+            meta.update({"name": source.name, "input_sha256": sha, "pages": npages, "source_paths": paths,
                          "state": "running", "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
             write_meta(d, meta)
             t0 = time.monotonic()

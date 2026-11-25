@@ -1,14 +1,18 @@
-"""macOS の .app（Finder の「このアプリケーションで開く」・ドック）から使う起動部分。
+"""macOS の .app（Launchpad・Spotlight・Dock・Finder の「このアプリケーションで開く」）から使う起動部分。
 
-- ビューアは1つだけ常駐させる（状態ファイルに接続情報を置く）。すでに動いていれば、そこへ PDF を加えて開くだけ。
+- ビューアは1つだけ常駐させる（状態ファイルに接続情報を置く）。すでに動いていれば、そこへ資料を加えて開くだけ。
+  画面は、いつものブラウザで開く（http://127.0.0.1 のみ。外部には公開しない）。
 - 常駐するビューアは、操作が一定時間なければ自分で終了する。
 - 状態ファイルは自分だけが読める（トークンを含む）。
+- 起動時のフック: `~/Library/Application Support/Alice STEM Reader/hooks/on-launch` に実行できるファイルを置くと、
+  アプリを開くたびに裏で実行する（ほかのアプリを一緒に起動したいときなど。置かなければ何もしない）。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -17,12 +21,33 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-APP_NAME = "Alice STEM PDF Reader"
+APP_NAME = "Alice STEM Reader"
+SNIP_APP_NAME = "Alice STEM Snip"
 IDLE_EXIT_MIN = 120
+_OLD_SUPPORT = "PDF LaTeX Overlay"  # 以前の版の置き場所（あれば、そのまま使う）
 
 
 def support_dir() -> Path:
-    return Path(os.environ.get("PLO_APP_DIR") or Path.home() / "Library" / "Application Support" / "PDF LaTeX Overlay")
+    if os.environ.get("PLO_APP_DIR"):
+        return Path(os.environ["PLO_APP_DIR"])
+    base = Path.home() / "Library" / "Application Support"
+    new = base / APP_NAME
+    _migrate(base / _OLD_SUPPORT, new)
+    return new
+
+
+def _migrate(old: Path, new: Path):
+    """以前の版の設定（追加したフォルダ・前回のフォルダ）を引き継ぐ（コピーするだけ。古い方は消さない）。"""
+    if not old.is_dir():
+        return
+    for name in ("roots.json", "app.json"):
+        src, dst = old / name, new / name
+        if src.is_file() and not dst.exists():
+            try:
+                new.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(src.read_bytes())
+            except OSError:
+                pass
 
 
 def state_path() -> Path:
@@ -37,8 +62,26 @@ def config_path() -> Path:
     return support_dir() / "app.json"
 
 
+def hooks_dir() -> Path:
+    return support_dir() / "hooks"
+
+
 def log_path() -> Path:
     return Path(os.environ.get("PLO_APP_LOG") or Path.home() / "Library" / "Logs" / f"{APP_NAME}.log")
+
+
+def run_hook(name: str = "on-launch") -> bool:
+    """利用者が置いたフック（実行できるファイル）があれば、裏で実行する。自分が持ち主で、他人が書き換えられないものだけ。"""
+    h = hooks_dir() / name
+    try:
+        st = h.stat()
+    except OSError:
+        return False
+    if not stat.S_ISREG(st.st_mode) or not os.access(h, os.X_OK) or st.st_uid != os.getuid() or st.st_mode & 0o022:
+        return False
+    with open(log_path(), "ab") as log:
+        subprocess.Popen([str(h)], stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    return True
 
 
 def read_state() -> dict | None:
@@ -95,7 +138,12 @@ def last_folder() -> str | None:
 
 def _remember_folder(folder: str):
     support_dir().mkdir(parents=True, exist_ok=True)
-    config_path().write_text(json.dumps({"last_folder": folder}, ensure_ascii=False), encoding="utf-8")
+    try:
+        cfg = json.loads(config_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cfg = {}
+    cfg["last_folder"] = folder
+    config_path().write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
 
 
 def _spawn(roots: list[str], backend: str, wait_s: float) -> dict:
@@ -124,9 +172,11 @@ def app_open(files: list[str] | None = None, folder: str | None = None, backend:
              wait_s: float = 60.0, opener=webbrowser.open) -> dict:
     """PDF（複数可）またはフォルダをビューアで開く。動いていれば再利用する。"""
     files = [str(Path(f).expanduser()) for f in (files or [])]
+    from .docformats import is_supported
+
     for f in files:
-        if not Path(f).is_file() or Path(f).suffix.lower() != ".pdf":
-            raise ValueError(f"PDF ではない、または見つからない: {f}")
+        if not Path(f).is_file() or not is_supported(f):
+            raise ValueError(f"対応していない形式か、見つからない: {f}")
     if folder:
         folder = str(Path(folder).expanduser().resolve())
         if not Path(folder).is_dir():
@@ -159,3 +209,23 @@ def app_stop() -> bool:
     except (urllib.error.URLError, OSError):
         pass
     return True
+
+
+def app_snip(mode: str = "auto", backend: str = "unimernet", wait_s: float = 60.0, notify=True) -> dict:
+    """画面の範囲を選んで読み、結果をクリップボードへ（Snip アプリ・ショートカットから）。ビューアがなければ、画面を開かずに起動する。"""
+    from .snip import notify as _notify
+
+    st = running_state() or _spawn([], backend, wait_s)
+    cfg = {}
+    try:
+        cfg = json.loads(config_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    body = {"mode": mode, "copy": True, "delim": cfg.get("delim", "paren"), "single": bool(cfg.get("single", False))}
+    r = _call(st, "POST", "/api/snip/screen", body, timeout=600.0)
+    if notify and not r.get("cancelled"):
+        if r.get("latex"):
+            _notify(APP_NAME, ("コピーしました: " if r.get("copied") else "読み取りました: ") + r["latex"].replace("\n", " ")[:120])
+        else:
+            _notify(APP_NAME, "読み取れませんでした" + (f"（{r.get('error')}）" if r.get("error") else ""))
+    return r

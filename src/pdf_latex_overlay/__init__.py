@@ -1,6 +1,9 @@
-"""Alice STEM PDF Reader: 元PDFを変えずに、数式をLaTeXとしてコピーできる派生PDFを作る。"""
+"""Alice STEM Reader: 資料（PDF・EPUB・DjVu・画像・Markdown・LaTeX）を読みながら、数式と文章を LaTeX / Markdown として取り出す。
 
-__version__ = "0.1.0"
+すべて手元の PC で動く。原本は変えない。数式をコピーできる派生 PDF も作れる。
+"""
+
+__version__ = "0.2.0"
 
 from .pipeline import ExitCode, Options, RunReport, process_pdf  # noqa: E402
 

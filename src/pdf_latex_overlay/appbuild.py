@@ -1,8 +1,13 @@
-"""macOS の .app を作る（AppleScript のアプレット + Info.plist の書き換え）。
+"""macOS のアプリ（.app）を作る。Launchpad・Spotlight・Raycast などのランチャーから開ける。
 
-- Finder で PDF を右クリック →「このアプリケーションで開く」に出る（PDFを開く既定のアプリは、奪わない: LSHandlerRank = Alternate）。
-- PDF やフォルダを .app のアイコンにドロップしても開く。ダブルクリックすると、フォルダを選んで開く。
-- アプリは薄い起動部分だけで、プログラム本体・仮想環境は、このプロジェクトのものを使う（場所を埋め込むので、プロジェクトを動かしたら作り直す）。
+- **Alice STEM Reader.app**: ビューアを起動して、いつものブラウザで開く。
+  Finder で資料を右クリック →「このアプリケーションで開く」にも出る（PDF・EPUB・DjVu・画像・Markdown・LaTeX など）。
+  既定で開くアプリは奪わない（LSHandlerRank = Alternate）。資料やフォルダを、アイコンにドロップしても開く。
+- **Alice STEM Snip.app**: 画面の範囲をドラッグで選ぶと、その部分を読んで、結果をクリップボードに入れる（Mathpix Snip と同じ使い方）。
+  ショートカットに割り当てると便利（システム設定 → キーボード → ショートカット、Raycast・Alfred のホットキーなど）。
+
+アプリは薄い起動部分（AppleScript のアプレット）だけで、プログラムと仮想環境は、このプロジェクトのものを使う
+（場所を埋め込むので、プロジェクトを動かしたら作り直す）。署名は自分用（ad-hoc）で、配布用ではない。
 """
 
 from __future__ import annotations
@@ -14,10 +19,25 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .applaunch import APP_NAME, log_path
+from .applaunch import APP_NAME, SNIP_APP_NAME, log_path
 
-BUNDLE_ID = "com.harukaze.pdf-latex-overlay"
+BUNDLE_ID = "io.github.alice-stem-reader.reader"
+SNIP_BUNDLE_ID = "io.github.alice-stem-reader.snip"
 LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+ICON_PNG = Path(__file__).resolve().parent / "assets" / "icon-1024.png"
+
+# Finder の「このアプリケーションで開く」に出す形式（UTI と拡張子）
+DOC_TYPES = [
+    ("PDF Document", ["com.adobe.pdf"], ["pdf"]),
+    ("EPUB Book", ["org.idpf.epub-container", "org.idpf.epub-folder"], ["epub"]),
+    ("DjVu Document", ["com.lizardtech.djvu", "org.djvu.djvu"], ["djvu", "djv"]),
+    ("Image", ["public.image"], ["png", "jpg", "jpeg", "tif", "tiff", "heic", "heif", "webp", "bmp", "gif"]),
+    ("Markdown", ["net.daringfireball.markdown"], ["md", "markdown"]),
+    ("LaTeX Source", ["org.tug.tex", "public.tex"], ["tex", "latex", "ltx"]),
+    ("Plain Text", ["public.plain-text"], ["txt"]),
+    ("E-book", [], ["mobi", "fb2", "xps", "oxps", "cbz"]),
+    ("Folder", ["public.folder"], []),
+]
 
 
 def _q(s: str) -> str:
@@ -46,18 +66,76 @@ on open theItems
 end open
 
 on startViewer(args)
-	-- Alice がインストールされている端末では、常駐キャラクターも起動する。
 	try
-		do shell script "/usr/bin/pgrep -x -u $(/usr/bin/id -u) alice-app >/dev/null || /usr/bin/open -gj -b com.harukaze.alice --args --archive-background"
-	end try
-	try
-		do shell script (my buildCmd("app-open") & args & " 2>&1")
+		do shell script (my buildCmd("app-open --hook") & args & " 2>&1")
 	on error errMsg
-		-- 失敗の理由（例: 同じ PDF が別のビューアで開かれている）を、ダイアログで知らせる
-		display alert "Alice STEM PDF Reader" message errMsg as warning
+		-- 失敗の理由（例: 同じ資料が別のビューアで開かれている、変換に必要な道具がない）を、ダイアログで知らせる
+		display alert "{APP_NAME}" message errMsg as warning
 	end try
 end startViewer
 '''
+
+
+def snip_applescript(python: str) -> str:
+    return f'''property py : "{_q(python)}"
+
+on run
+	try
+		do shell script quoted form of py & " -m pdf_latex_overlay app-snip 2>&1"
+	on error errMsg
+		display alert "{SNIP_APP_NAME}" message errMsg as warning
+	end try
+end run
+'''
+
+
+def _icns(dest_icns: Path) -> bool:
+    """同梱の 1024px の PNG から .icns を作る（sips と iconutil。macOS のみ）。"""
+    if not ICON_PNG.is_file() or not shutil.which("iconutil") or not shutil.which("sips"):
+        return False
+    with tempfile.TemporaryDirectory() as td:
+        iset = Path(td) / "icon.iconset"
+        iset.mkdir()
+        for size in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                px = size * scale
+                name = f"icon_{size}x{size}{'@2x' if scale == 2 else ''}.png"
+                subprocess.run(["sips", "-z", str(px), str(px), str(ICON_PNG), "--out", str(iset / name)],
+                               check=True, capture_output=True)
+        r = subprocess.run(["iconutil", "-c", "icns", str(iset), "-o", str(dest_icns)], capture_output=True)
+        return r.returncode == 0 and dest_icns.is_file()
+
+
+def _compile(app: Path, script: str):
+    if app.exists():
+        shutil.rmtree(app)
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "launcher.applescript"
+        src.write_text(script, encoding="utf-8")
+        subprocess.run(["osacompile", "-o", str(app), str(src)], check=True, capture_output=True, text=True)
+
+
+def _finish(app: Path, info_update: dict, register: bool):
+    res = app / "Contents" / "Resources"
+    plist_path = app / "Contents" / "Info.plist"
+    info = plistlib.loads(plist_path.read_bytes())
+    info.update(info_update)
+    if _icns(res / "applet.icns"):
+        (res / "Assets.car").unlink(missing_ok=True)  # 新しい macOS の osacompile は、こちらのアイコンを優先する
+        info.pop("CFBundleIconName", None)
+        info["CFBundleIconFile"] = "applet"
+    plist_path.write_bytes(plistlib.dumps(info))
+    subprocess.run(["codesign", "--force", "--deep", "-s", "-", str(app)], check=True, capture_output=True, text=True)
+    if register and Path(LSREGISTER).exists():
+        subprocess.run([LSREGISTER, "-f", str(app)], check=False, capture_output=True)
+
+
+def _common_info(name: str, bundle_id: str) -> dict:
+    from . import __version__
+
+    return {"CFBundleIdentifier": bundle_id, "CFBundleName": name, "CFBundleDisplayName": name,
+            "CFBundleShortVersionString": __version__, "LSApplicationCategoryType": "public.app-category.education",
+            "NSHumanReadableCopyright": "Alice STEM Reader — runs locally; documents never leave this Mac."}
 
 
 def build_app(dest_dir, python: str | None = None, register: bool = True) -> Path:
@@ -67,32 +145,28 @@ def build_app(dest_dir, python: str | None = None, register: bool = True) -> Pat
     dest = Path(dest_dir).expanduser()
     dest.mkdir(parents=True, exist_ok=True)
     app = dest / f"{APP_NAME}.app"
-    if app.exists():
-        shutil.rmtree(app)
-    with tempfile.TemporaryDirectory() as td:
-        src = Path(td) / "launcher.applescript"
-        src.write_text(applescript(python, str(log_path())), encoding="utf-8")
-        subprocess.run(["osacompile", "-o", str(app), str(src)], check=True, capture_output=True, text=True)
-    plist_path = app / "Contents" / "Info.plist"
-    info = plistlib.loads(plist_path.read_bytes())
-    info.update({
-        "CFBundleIdentifier": BUNDLE_ID,
-        "CFBundleName": APP_NAME,
-        "CFBundleDisplayName": APP_NAME,
-        "CFBundleDocumentTypes": [{
-            "CFBundleTypeName": "PDF Document",
-            "CFBundleTypeRole": "Viewer",
-            "LSHandlerRank": "Alternate",  # 既定のアプリは奪わず、「このアプリケーションで開く」に出す
-            "LSItemContentTypes": ["com.adobe.pdf"],
-        }, {
-            "CFBundleTypeName": "Folder",
-            "CFBundleTypeRole": "Viewer",
-            "LSHandlerRank": "Alternate",
-            "LSItemContentTypes": ["public.folder"],
-        }],
-    })
-    plist_path.write_bytes(plistlib.dumps(info))
-    subprocess.run(["codesign", "--force", "--deep", "-s", "-", str(app)], check=True, capture_output=True, text=True)
-    if register and Path(LSREGISTER).exists():
-        subprocess.run([LSREGISTER, "-f", str(app)], check=False, capture_output=True)
+    _compile(app, applescript(python, str(log_path())))
+    doc_types = []
+    for name, utis, exts in DOC_TYPES:
+        t = {"CFBundleTypeName": name, "CFBundleTypeRole": "Viewer", "LSHandlerRank": "Alternate"}  # 既定のアプリは奪わない
+        if utis:
+            t["LSItemContentTypes"] = utis
+        if exts:
+            t["CFBundleTypeExtensions"] = exts
+        doc_types.append(t)
+    _finish(app, {**_common_info(APP_NAME, BUNDLE_ID), "CFBundleDocumentTypes": doc_types,
+                  "NSScreenCaptureUsageDescription": "「画面を Snip」で、選んだ範囲を読み取るために使います（画像は外部に送りません）。"}, register)
+    return app
+
+
+def build_snip_app(dest_dir, python: str | None = None, register: bool = True) -> Path:
+    if sys.platform != "darwin" or not shutil.which("osacompile"):
+        raise RuntimeError(".app は macOS（osacompile が必要）でだけ作れる")
+    python = python or sys.executable
+    dest = Path(dest_dir).expanduser()
+    dest.mkdir(parents=True, exist_ok=True)
+    app = dest / f"{SNIP_APP_NAME}.app"
+    _compile(app, snip_applescript(python))
+    _finish(app, {**_common_info(SNIP_APP_NAME, SNIP_BUNDLE_ID),
+                  "NSScreenCaptureUsageDescription": "画面の選んだ範囲を読み取るために使います（画像は外部に送りません）。"}, register)
     return app

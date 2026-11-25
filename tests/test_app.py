@@ -45,8 +45,8 @@ def test_hub_add_paths(fx, tmp_path):
     assert len(h.roots) == 1
     ids = h.add_paths([str(other)])
     assert ids == [h.id_of(other)] and len(h.roots) == 2 and ids[0] in h.index
-    (tmp_path / "x.txt").write_text("x")
-    for bad in ([str(tmp_path / "x.txt")], [str(tmp_path / "none.pdf")], [], "a.pdf", [1]):
+    (tmp_path / "x.docx").write_text("x")  # 対応していない形式
+    for bad in ([str(tmp_path / "x.docx")], [str(tmp_path / "none.pdf")], [], "a.pdf", [1]):
         with pytest.raises(SessionError):
             h.add_paths(bad)
     h.close()
@@ -135,10 +135,11 @@ def test_build_app_has_open_with_pdf_and_is_signed(tmp_path):
     from pdf_latex_overlay.appbuild import BUNDLE_ID, build_app
 
     app = build_app(tmp_path, python="/path with space/python", register=False)
-    assert app.name == "Alice STEM PDF Reader.app"
+    assert app.name == "Alice STEM Reader.app"
     info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
     assert info["CFBundleIdentifier"] == BUNDLE_ID
-    types = {t["LSItemContentTypes"][0]: t for t in info["CFBundleDocumentTypes"]}
+    types = {t["LSItemContentTypes"][0]: t for t in info["CFBundleDocumentTypes"] if t.get("LSItemContentTypes")}
+    assert "org.idpf.epub-container" in types and any("djvu" in t.get("CFBundleTypeExtensions", []) for t in info["CFBundleDocumentTypes"])
     assert types["com.adobe.pdf"]["LSHandlerRank"] == "Alternate"  # 既定のPDFアプリは奪わない
     assert types["com.adobe.pdf"]["CFBundleTypeRole"] == "Viewer"
     assert subprocess.run(["codesign", "--verify", "--deep", str(app)], capture_output=True).returncode == 0
@@ -154,6 +155,8 @@ def test_launch_script_has_no_chooser_dialog():
     assert "display dialog" not in src and "choose folder" not in src and "choose file" not in src
     assert 'startViewer("")' in run  # 何も渡さずに、ビューアを起動する
     assert "on open theItems" in src  # Finder の「このアプリケーションで開く」・ドロップは、そのまま使える
+    assert "pgrep" not in src and "open -gj" not in src  # ほかのアプリを勝手に起動しない（必要ならフックで）
+    assert "app-open --hook" in src
 
 
 def test_app_open_without_arguments_starts_the_viewer_and_opens_the_browser(fx, tmp_path, monkeypatch):
@@ -195,3 +198,31 @@ def test_opening_does_not_auto_recognize_by_default():
     assert p.parse_args(["viewer", "x.pdf", "--no-auto"]).auto is False  # 以前の指定でも動く
     assert inspect.signature(serve).parameters["auto"].default is False
     assert '"auto": False' in inspect.getsource(applaunch.app_open)
+
+
+def test_launch_hook_runs_only_safe_user_files(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "app.log"))
+    assert applaunch.run_hook() is False  # なければ何もしない
+    h = applaunch.hooks_dir() / "on-launch"
+    h.parent.mkdir(parents=True)
+    out = tmp_path / "ran"
+    h.write_text(f"#!/bin/sh\ntouch '{out}'\n")
+    os.chmod(h, 0o755)
+    assert applaunch.run_hook() is True
+    for _ in range(50):
+        if out.exists():
+            break
+        time.sleep(0.05)
+    assert out.exists()
+    os.chmod(h, 0o777)  # 他人が書き換えられるファイルは実行しない
+    assert applaunch.run_hook() is False
+
+
+def test_snip_applescript_calls_app_snip():
+    from pdf_latex_overlay.appbuild import snip_applescript
+
+    src = snip_applescript("/x y/python")
+    assert "app-snip" in src and "on run" in src and "/x y/python" in src

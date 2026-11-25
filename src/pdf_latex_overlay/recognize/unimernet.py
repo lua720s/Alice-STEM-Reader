@@ -87,9 +87,9 @@ class UniMERNetBackend:
 
     def _check(self):
         if not self.python.exists():
-            raise RecognizerUnavailable(f"ML 用 Python がない: {self.python}（MODELS.md の手順で導入）")
+            raise RecognizerUnavailable(f"ML 用 Python がない: {self.python}（docs/MODELS.md の手順で導入）")
         if not self.model_dir.is_dir() or not list(self.model_dir.glob("*.pth")):
-            raise RecognizerUnavailable(f"UniMERNet の重みがない: {self.model_dir}（MODELS.md の手順で取得）")
+            raise RecognizerUnavailable(f"UniMERNet の重みがない: {self.model_dir}（docs/MODELS.md の手順で取得）")
 
     def start(self):
         if self.proc and self.proc.poll() is None:

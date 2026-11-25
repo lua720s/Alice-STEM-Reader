@@ -50,9 +50,9 @@ class MFDDetector:
         if self.proc and self.proc.poll() is None:
             return
         if not self.python.exists():
-            raise RecognizerUnavailable(f"ML 用 Python がない: {self.python}（MODELS.md の手順で導入）")
+            raise RecognizerUnavailable(f"ML 用 Python がない: {self.python}（docs/MODELS.md の手順で導入）")
         if not self.weights.is_file():
-            raise RecognizerUnavailable(f"数式検出の重みがない: {self.weights}（MODELS.md の手順で取得）")
+            raise RecognizerUnavailable(f"数式検出の重みがない: {self.weights}（docs/MODELS.md の手順で取得）")
         self.proc = subprocess.Popen([str(self.python), "-I", str(WORKER), "--weights", str(self.weights),
                                       "--device", self.device],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,

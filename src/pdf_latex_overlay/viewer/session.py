@@ -35,10 +35,13 @@ class SessionError(Exception):
 
 
 class ViewerSession:
-    def __init__(self, input_path, workdir, formulas_path=None, backend="none", backend_obj=None, detector_obj=None, verifier_obj=None):
+    def __init__(self, input_path, workdir, formulas_path=None, backend="none", backend_obj=None, detector_obj=None, verifier_obj=None,
+                 source=None):
         self.input = Path(input_path).resolve()
         if not self.input.is_file():
             raise SessionError(f"入力PDFがない: {self.input}", 404)
+        # 利用者が開いた元のファイル（EPUB・画像・Markdown など）。PDF なら input と同じ。input は変換した PDF
+        self.source = Path(source).resolve() if source else self.input
         self.input_sha = safety.sha256_file(self.input)
         self.workdir = Path(workdir).resolve()
         (self.workdir / "exports").mkdir(parents=True, exist_ok=True)
@@ -122,8 +125,13 @@ class ViewerSession:
 
     # ---- API ----
     def doc_info(self) -> dict:
+        from ..docformats import conversion_info, kind_of
+
+        conv = conversion_info(self.input) if self.source != self.input else {}
         return {
-            "name": self.input.name,
+            "name": self.source.name,
+            "format": kind_of(self.source) or "pdf",
+            "conversion": {k: conv[k] for k in ("method", "compile_error") if k in conv} or None,
             "sha256": self.input_sha,
             "pages": [{"width": p.rect.width, "height": p.rect.height, "rotation": p.rotation} for p in self.doc],
             "backend": self.backend_name,
@@ -527,10 +535,10 @@ class ViewerSession:
             if f.kind == "text" and f.latex:
                 f.latex = convert_delims(f.latex, delim)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        out = self.workdir / "exports" / f"{self.input.stem}.latex-{stamp}.pdf"
+        out = self.workdir / "exports" / f"{self.source.stem}.latex-{stamp}.pdf"
         n = 1
         while out.exists():
-            out = self.workdir / "exports" / f"{self.input.stem}.latex-{stamp}-{n}.pdf"
+            out = self.workdir / "exports" / f"{self.source.stem}.latex-{stamp}-{n}.pdf"
             n += 1
         rep = process_pdf(self.input, out, snapshot,
                           Options(mode=mode, require_confirmed=only_confirmed,
@@ -543,6 +551,48 @@ class ViewerSession:
             "excluded": [{"id": f["id"], "reason": f["reason"]} for f in rep.formulas if f["status"] == "excluded"],
             "failed_checks": [k for k, v in rep.checks.items() if isinstance(v, dict) and v.get("ok") is False],
         }
+
+    def export_text(self, fmt: str = "md", only_confirmed: bool = False) -> tuple[str, str, str]:
+        """認識した文章と数式を、ページごとに読む順（上から下、左から右）に並べた原稿。(本文, MIME, ファイル名)。
+
+        fmt: md（数式は $…$・$$…$$）/ tex（\\( … \\)・\\[ … \\]）。メモ（PDF 全体・ページ）も入れる。除外した枠は入れない。
+        """
+        from ..delims import convert_delims, wrap_single
+
+        if fmt not in ("md", "tex"):
+            raise SessionError("fmt は md か tex")
+        style = "dollar" if fmt == "md" else "paren"
+        notes = self.notes_get()
+        with self.lock:
+            items = [f for f in self.fs.formulas if f.latex and f.status != "excluded" and (f.status == "confirmed" or not only_confirmed)]
+            views = {f.id: self._view(f).get("view_rect") or list(f.rect) for f in items}
+        out = []
+        title = self.source.stem
+        if fmt == "md":
+            out.append(f"# {title}\n\n<!-- Alice STEM Reader: {self.source.name} / sha256 {self.input_sha[:16]} -->")
+        else:
+            out.append(f"% Alice STEM Reader: {self.source.name} / sha256 {self.input_sha[:16]}\n\\section*{{{title}}}")
+        if notes.get("doc", "").strip():
+            out.append(notes["doc"].strip())
+        for pno in range(self.doc.page_count):
+            page_items = sorted((f for f in items if f.page == pno), key=lambda f: (round(views[f.id][1] / 6), views[f.id][0]))
+            pnote = notes.get("pages", {}).get(str(pno), "").strip()
+            if not page_items and not pnote:
+                continue
+            out.append(f"<!-- p.{pno + 1} -->" if fmt == "md" else f"% p.{pno + 1}")
+            if pnote:
+                out.append(("> " + pnote.replace("\n", "\n> ")) if fmt == "md" else "% " + pnote.replace("\n", "\n% "))
+            for f in page_items:
+                body = f.latex.strip()
+                if f.kind == "text":
+                    out.append(convert_delims(body, style))
+                else:  # 数式だけの枠: 1行は行内、複数行は表示数式
+                    out.append(wrap_single(body, style))
+        text = "\n\n".join(out) + "\n"
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        if fmt == "md":
+            return text, "text/markdown", f"{self.source.stem}-{stamp}.md"
+        return text, "application/x-tex", f"{self.source.stem}-{stamp}.tex"
 
     def close(self):
         self._stop.set()  # 裏の自動認識を、区切りのよいところで止める

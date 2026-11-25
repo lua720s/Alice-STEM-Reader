@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f6fdc"/>
+      <stop offset="1" stop-color="#172f73"/>
+    </linearGradient>
+    <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e9eef9"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <!-- ページ -->
+  <path d="M300 214h330l124 124v472a40 40 0 0 1-40 40H300a40 40 0 0 1-40-40V254a40 40 0 0 1 40-40z" fill="url(#pg)"/>
+  <path d="M630 214v104a20 20 0 0 0 20 20h104z" fill="#c9d6f2"/>
+  <!-- 数式（積分記号） -->
+  <path d="M548 352c-34-14-70 4-78 48l-52 268c-7 38-34 54-62 40" fill="none" stroke="#1d2b55" stroke-width="34" stroke-linecap="round"/>
+  <!-- Snip の枠（四隅） -->
+  <g fill="none" stroke="#ff8a3d" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M330 470v-60h60"/><path d="M630 410h60v60"/><path d="M690 640v60h-60"/><path d="M390 700h-60v-60"/>
+  </g>
+</svg>

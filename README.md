@@ -1,130 +1,178 @@
-# Alice STEM Reader (Alice-STEM-Reader)
+<p align="center"><img src="src/pdf_latex_overlay/assets/icon-1024.png" width="112" alt=""></p>
 
-PDF上で数式を選択し、編集可能な LaTeX としてコピーできる派生PDFを生成する独立プロジェクト。元PDFは読み取り専用とし、ページの見た目を維持する。
+# Alice STEM Reader
 
-macOS アプリを開くと、AliceApp がインストール済みの場合はバックグラウンドで一緒に起動します。
+**資料を見ながら、数式と文章を「その部分だけ」LaTeX・Markdown にする、手元で動く STEM リーダー。**
 
-## 用途
+PDF ビューアで教科書・論文・講義資料を読みながら、**フラッシュカードを作ったり、レポートや論文を書いたりするのに最適**です。
+気になる式を囲む（Snip する）だけで、編集できる LaTeX がクリップボードに入ります。画面に映っているもの、手書きのノートの写真、
+EPUB・DjVu・Markdown・LaTeX の原稿も、同じ操作で読めます。
 
-**PDFを閲覧しながら、数式をクリックひとつでLaTeXとしてコピーするのに最適なローカルツール**です。
+- **すべて手元の PC で動く。** 資料も画像も、外部に送りません（外部の認識サービスは、明示的に選んで同意したときだけ）。
+- **原本は変えない。** 認識の結果・メモ・変換した PDF は、別の場所（ライブラリ）に保存します。
+- **どこから来たかが残る。** Snip ごとに、資料名・ページ・範囲・資料のハッシュ・認識エンジンと版・日時を記録します。
 
-- 数学・物理の参考書、論文、講義資料（スキャンPDFも可）を読みながら、気になる式をクリックしてLaTeXをコピーし、ノート・Anki・LaTeXエディタにそのまま貼れる。手で打ち直さなくてよい。
-- Mathpix Snip Webのような操作（枠をクリックしてコピー、ドラッグして枠を追加）が、**ローカルだけで**使える。PDFを外部に送らない。
-- 教材フォルダを、Obsidianのようなコレクション（フォルダの階層）で並べて読める。フォルダ全体や複数のPDFを選んで、まとめてOCR（数式の検出と認識）できる。事前に認識しておけば、開いてすぐコピーできる。
-- 元のPDFは変えず、見た目が同じで、式を選択するとLaTeXが取れる**派生PDF**も作れる。macOSのプレビューなど、普通のPDFビューアでも使える。
-- 認識の誤りは、画面で確認・修正してから使える（修正前の認識結果も残る）。
-- Aliceの学習機能（AliceArchive）に、PDFから数式を取り込む部品として組み込める。
+[English summary](#english)
 
-- [エージェント・AIの作業ルール](AGENTS.md)
-- [会話・指示ログ](AI_LOG.md)
-- [要件と合格基準](REQUIREMENTS.md)
-- [モジュール設計とPDFへの埋め込み方式](DESIGN.md)
-- [実装順序、夜間実行、Git](ROADMAP.md)
-- [Mathpix公式仕様と実機検証手順](MATHPIX_VALIDATION.md)
-- [モデルと認識の記録（UniMERNet）](MODELS.md)
-- [Claude Desktop / Claude Codeへの実装依頼](CLAUDE_TASK.md)
+---
 
-実装状況（2026-11-18）: 合成フィクスチャ・外観検査（段階0）、埋め込み2方式の比較（2c、既定は不可視テキスト）、検証付きCLI（2d）、ローカルビューア、UniMERNetによる切り出し認識（2a）、MinerU結果の取り込み（2b）、Mathpix検証（1）を実装し、合成データで試験済み（72件）。実教材（スキャン2ページ・11式）では、埋め込みとコピーは全件合格。ただしUniMERNet-tinyの認識は約半数が誤りで、修正が要る（MODELS.md）。macOSプレビューでの手動コピー確認は未実施。Mathpixは合成フィクスチャで4ジョブを実測済み（2026-11-19）。Codexの試作とMathpixの実測は [検証記録](MATHPIX_VALIDATION.md) を参照。
+## できること
 
-## 使い方（開発版）
+| | |
+| --- | --- |
+| **Snip（範囲を読む）** | 画面の任意の範囲（macOS）・資料のページの範囲・画像（ファイル・貼り付け・ドロップ）を読み、**数式は LaTeX、文章＋数式は「文章 `\( … \)`」** にする。結果は履歴に残り、修正・コピー・書き出しができる |
+| **数式をクリックでコピー** | ページ全体の数式を検出・認識しておけば、式の枠をクリックするだけで LaTeX をコピー。見落とした式はドラッグで追加 |
+| **多くの形式** | PDF（スキャン可）・EPUB・MOBI・FB2・XPS・CBZ・DjVu・画像（PNG・JPEG・TIFF・HEIC・WebP など）・Markdown・LaTeX・テキスト |
+| **手書き** | 手書きの式やノートの写真も読める（スマートフォンの写真の向きは自動で補正） |
+| **書き出し** | Snip の履歴を **Markdown・LaTeX・TSV（フラッシュカードのアプリに読み込める）・JSON（出所の記録つき）** に。資料ごとに、認識した文章と数式を読む順に並べた **Markdown / LaTeX の原稿** も作れる |
+| **数式をコピーできる PDF** | 見た目は原本と同じまま、数式を選ぶと LaTeX が取れる派生 PDF を作る（macOS のプレビューなど、普通のビューアで使える）。外観・構造・コピーを検証してから保存 |
+| **確認を助ける** | 2 つのモデルの読みが食い違った式に「要確認」の印を付ける（任意） |
+| **資料の整理** | フォルダの階層をそのまま並べる（Obsidian 風）。名前の変更・移動・ゴミ箱、ビューア専用のフォルダ、まとめて OCR（中断・再開可） |
+| **使いやすさ** | 日本語・English・中文・Español・Русский、ライト / ダーク、キーボード操作、資料ごと・ページごとのメモ |
 
-```bash
-/opt/homebrew/bin/python3.12 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest -q                     # 合成フィクスチャで全試験
-.venv/bin/python -m pdf_latex_overlay fixtures outputs/fixtures
-.venv/bin/python -m pdf_latex_overlay embed in.pdf out.pdf --formulas formulas.json --report report.json
-.venv/bin/python -m pdf_latex_overlay prepare 教材フォルダ/          # 開く前にまとめて認識（中断・再開可）
-.venv/bin/python -m pdf_latex_overlay library                       # 事前処理した PDF の一覧
-.venv/bin/python -m pdf_latex_overlay viewer in.pdf --backend unimernet   # 1つのPDFを開く（127.0.0.1 のみ）
-.venv/bin/python -m pdf_latex_overlay viewer 教材フォルダ/ --backend unimernet   # フォルダの階層を左に並べる
-```
+## はじめかた（macOS）
 
-- `embed` は原本を読み取り専用で扱い、外観（画素差ゼロ）・構造・本文・コピー（MuPDF、PDFKit）の検証に通った場合だけ `out.pdf` を作る。失敗時は出力を作らず、終了コード（2 設定、3 原本保護・衝突、4 未対応PDF、5 検証不合格、6 中断、7 対象なし）とレポートを返す。
-- **コレクション（Obsidian風）**: ビューアにフォルダを渡すと、左のサイドバーにフォルダの階層がそのまま並ぶ。フォルダの開閉、検索（`/`）、キーボード操作（↑↓←→・Enter）、幅の変更（境目をドラッグ）、開閉の記憶に対応する。子が1つのフォルダの連なりは1行にまとめる。PDFごとに状態（準備済み・一部・未処理）と式の件数を表示し、クリックすると切り替わる。認識用のモデルはPDFを切り替えても読み込み直さない。選んだだけでは認識を始めない（「全ページを認識」で始める）。852個のPDFの一覧は0.1秒、状態の確認は約2秒で出る（実測）。
-- **ページの操作（SpeakerDeck風）**: 1ページずつ画面に収め、スクロールはページの境目でカチッと止まる。`←` `→`・`Space`・`PageUp/Down`・`Home/End` でページ送り、下の送りボタン・スライダー、左右の矢印にも対応する。表示は「全体」（1ページを1画面に収める）と「幅」（幅に合わせて縦にスクロール）を `F` で切り替えられる。`B` でコレクションの開閉。表示するPDFと最後に見たページは記憶する。
-- **ライト・ダーク**: 上のバー右端の3つのボタン（自動・ライト・ダーク）で切り替える。自動はOSの設定に合わせる。選択は記憶する。
-- **ファイル操作とOCR（⋯メニュー）**: 上のバーのタイトルの横と、コレクションの各行（マウスを乗せる、または右クリック）の「⋯」から、**名前を変更・別の場所へ移動・ゴミ箱へ移動・OCRを行う**ができる。フォルダには「新しいフォルダ」もある。左上の「複数選択」（または ⌘/Ctrl＋クリック）で複数のPDF・フォルダを選び、まとめてOCR・移動・ゴミ箱へ移せる。フォルダ行のOCRボタンで、フォルダ全体をOCRできる。OCRは進み具合が出て、途中でキャンセルでき、あとで続きから再開できる。上のバーの「このページを認識」は、いま表示しているページだけを検出・認識する。
-  - 名前の変更・移動・削除は、**実際のフォルダとファイルを動かす**。安全のため、一覧にあるフォルダの外へは動かせず、同じ名前があれば上書きせず、削除は永久削除ではなく**ゴミ箱へ移す**（元に戻せる）。操作は `library/operations.jsonl` に記録する。認識の結果はPDFの中身に結び付いているので、名前を変えても、動かしても、ゴミ箱に移しても残る。動かしたくないときは `--readonly` で起動する。
-- **要確認の印（2つのモデルで突き合わせ）**: `--verify` を付けて起動すると（`viewer`・`prepare`・`recognize`）、tiny（既定）とbaseの2つのモデルで同じ枠を読み、**読み取りが数学的に食い違った式に「要確認」の印**を付ける。画面では、枠が橙の点線と「!」になり、上のバーに「要確認 N 件 →」、コレクションの各PDFに「要確認 N」が出る。印のある式を選ぶと、もう一方のモデルの読み取りとプレビューが出て、「こちらを採用」で置き換えられる。`N` キー（戻るのは `Shift+N`）で、次の要確認へ移る。確定・修正・除外をすると、印は消える。空白・書体・間隔・括弧の大きさ・同じ記号の別の書き方だけの違いは、食い違いに数えない。**約3倍遅く**（2ページ・48式で約4分）、メモリも2モデル分かかるので、既定では使わない。
-  - 実教材の正解つきの11式では、印のない7式はすべて正解で、tinyの誤り2件にはどちらも印が付いた（標本が小さいので傾向）。**2つのモデルが同じ間違い方をした式は、見逃す。** 印が付いた式は「間違い」ではなく「確認が必要」という意味。
-- **開く前に認識しておける（`prepare`）**: Mathpix Snip Webと同じく、PDFやフォルダを先にまとめて処理しておく。中断しても続きから再開でき、`--time-limit` と `--max-pages` で上限を決めて夜間に流せる。結果は、PDFの中身のハッシュで引くライブラリ（`library/`、Git管理外）に保存する。名前を変えたり移動したりしたPDFでも、そのまま使える。準備済みのPDFは、ビューアを起動して約0.4秒で全部の式をコピーできる（実教材2ページ・48式で実測）。事前処理の実行中にビューアで開くと、表示だけになり、結果が順に反映される。
-- `--backend unimernet` でビューアを開いても、**自動では認識しない**（2026-11-19に既定をやめた）。上部の「**このページを認識**」で、いま表示しているページの数式を検出・認識する。PDF全体は、⋯ メニューの「OCRを行う」。事前にOCR（`prepare`）した結果は、そのまま読み込まれる。以前のように、PDFを1つ指定して開いた時点で全ページを自動認識したいときだけ、`--auto` を付ける。枠を**クリックするとLaTeXをすぐコピー**する（Mathpix Snip Webと同様、数式検出は PDF-Extract-Kit MFD、MODELS.md）。`detect` コマンドで、式JSONだけを作ることもできる。
-- ビューアでは、ページ上を**ドラッグすると枠を追加して認識**する（`--backend unimernet`。Mathpix Snipと同様に、既存の枠の上からでも描ける）。枠を**クリックすると選択**し、LaTeXのコピー・修正・確定・除外、枠の引き直し、再認識、派生PDFの保存ができる。
-- 複数行を囲んだ枠は、行ごとに分けて認識し、改行で区切ったLaTeXにする。`\begin{array}`・`\displaystyle`・`\!`・余分な波括弧などの表示用の記法は取り除き、OCR原文は別に残す。派生PDFでも行ごとに文字層を置くので、コピーすると改行付きで取れる。
-- ほぼ同じ位置に描き直した枠は、未確定・未修正の古い枠と置き換える。一部だけ重なる枠は両方残し、PDF保存のときは「確定 → 修正済み → 小さい枠」の順に1つだけ埋め込む（残りは `overlaps:` で除外）。修正の履歴は作業領域の `history.jsonl` に残る。
-- 生成PDF・作業領域（`runs/`、`outputs/`）・モデル重み（`models/`）はGit管理外。
-
-## 「Failed to fetch」と出たとき
-
-ブラウザが、ビューア（このPCで動いている小さなサーバー）に届かなかったときの表示。画面の上に赤い案内も出る。主な原因は次のとおり。
-
-1. **ビューアが終了している。** ターミナルを閉じた、Ctrl+Cで止めた、AIの作業セッションが終わった、など。開きっぱなしのタブだけが残る。
-2. **起動し直して、接続先が変わった。** ビューアは起動のたびに、ポート番号とトークンが変わる。古いタブは、前の接続先に問い合わせ続けるので失敗する。起動したときに表示された**新しいURLを開き直す**。
-3. （修正済み）式の枠がページの外にあるなど、想定外の例外で、サーバーが応答しないまま接続を切っていた。いまは、原因を書いたエラー（400・500）を返し、サーバーは動き続ける。
-
-ビューアを動かし続けるには、自分のターミナルで起動して、そのウィンドウを開いたままにする。
+アプリとして Launchpad・Spotlight・Raycast などのランチャーから開き、画面はいつものブラウザで表示します。
 
 ```bash
-cd このフォルダ && .venv/bin/python -m pdf_latex_overlay viewer 教材フォルダ/ --backend unimernet
-
-### 認識エンジンの選択（PP-FormulaNet / UniMERNet / Mathpix）
-
-上部の「エンジン」で切り替えられる（`--backend unimernet | unimernet_tiny | ppformulanet | mathpix`、`prepare` と `recognize` も同じ）。**既定は UniMERNet base**（33式の試験で最も正確。MODELS.md）。
-
-- **UniMERNet base**（手元で動く・既定）: 実教材の33式で24式が正しく、最もよかった。tinyの約3倍遅い（先にOCRしておけば気にならない）。
-- **UniMERNet tiny**（手元で動く・軽い）: 速くメモリも少ないが、33式で17式。`--backend unimernet_tiny`、または画面の「エンジン」で選ぶ。
-- **PP-FormulaNet**（手元で動く）: 公開の評価では高いが、実教材の続きの行（`=` から始まる式）で劣った。`.venv-pp` の導入が要る（MODELS.md）。
-- **Mathpix**（**従量課金制のAPI**。**式の画像を外部に送る**）: 送る前に確認する（画面は確認ダイアログ、コマンドは `--allow-external`）。`mpx configure` で認証情報を設定しておく。認証情報はこのプログラムでは扱わない。
-
+git clone https://github.com/lua720s/Alice-STEM-Reader.git && cd Alice-STEM-Reader
+python3.12 -m venv .venv && .venv/bin/pip install -e .
+scripts/setup_models.sh                                   # 認識モデルの導入（約 6GB、SHA-256 を照合）
+.venv/bin/python -m pdf_latex_overlay build-app            # ~/Applications にアプリを 2 つ作る
 ```
 
+- **Alice STEM Reader** — ビューアを開きます。左上の「＋」で資料やフォルダを追加。Finder で資料を右クリック →「このアプリケーションで開く」、アイコンへのドロップでも開けます（既定で開くアプリは変えません）。
+- **Alice STEM Snip** — 起動すると、すぐ画面の範囲選択になります。選んだ部分を読んで、**結果をクリップボードに入れ、通知でお知らせ**します。
+  キーボードショートカットに割り当てると、Mathpix Snip と同じ感覚で使えます（Raycast・Alfred のホットキー、または「ショートカット」アプリ）。
 
+初回だけ、macOS の許可が必要です。
 
-### 画面の言語
+- **画面収録**: 「画面を Snip」を初めて使うとき（システム設定 → プライバシーとセキュリティ → 画面収録）。
+- **フォルダへのアクセス**: 書類などのフォルダを初めて開くとき。
 
-上部の言語メニューで、**日本語・English・中文・Español・Русский** を切り替えられる（選んだ言語は記憶する。初回はブラウザの言語に合わせる）。サーバーが返すエラー文は、まだ日本語のまま。
+ビューアは 1 つだけ常駐し、画面からの操作が 120 分なければ自動で終了します。
 
+## 使いかた
 
-### 題名の変更と、拡大・縮小
+### Snip
 
-- 上部の**題名をクリック**（またはフォーカスして Enter / F2）すると、PDFの名前を変更できる（⋯ メニューの「名前を変更」と同じ）。
-- **拡大・縮小**: 下部のバーの「−」「％」「＋」、`+` / `-` / `0` キー、Ctrl（⌘）＋ホイール、トラックパッドのピンチ。50%〜500%（「全体」「幅」の大きさが100%）。「％」を押すと100%に戻る。拡大すると、ページを縦横にスクロールできる。数式の枠も、拡大に合わせて動く。
+| 操作 | 内容 |
+| --- | --- |
+| 右のパネルの **「画面を Snip」**（または `S`、上のバーの Snip） | 画面の範囲をドラッグで選ぶ。結果はクリップボードへ（Esc で取り消し） |
+| **「ページの範囲」**（`R` で切り替え）＋ページ上をドラッグ | 開いている資料の範囲を読む（枠は残さない）。文字層がある資料では「文字層を使う」も選べる |
+| 画像を **⌘V / Ctrl+V** で貼り付け、パネルへ **ドロップ**、**「画像…」** で選ぶ | スクリーンショット・手書きのノートの写真などを読む（複数可） |
+| **読み方** | 自動（文章と数式を見分ける）／数式（LaTeX）／文章 |
+| **書き出す…** | Markdown（`$…$`）・LaTeX・TSV・JSON |
 
-### macOS アプリ（.app）と、Finder の「このアプリケーションで開く」
+**Markdown・テキスト・（コンパイルできなかった）LaTeX の原稿** をページの範囲で Snip すると、OCR を使わずに **原文そのもの** を取り出します（`$…$` の中身も崩れません）。
+
+### 数式の検出と認識、派生 PDF
+
+- 上のバーの **「このページを認識」** で、表示中のページの数式を検出・認識。資料全体は ⋯ メニューの「OCRを行う」（フォルダや複数選択でも可。進み具合の表示・キャンセル・再開あり）。
+- 式の枠を **クリックでコピー**、右のパネルで修正・確定・除外・再認識。
+- **「このページの文章を認識」** で日本語などの文章も読む（緑の枠）。
+- **「PDFを保存」** で、数式（と文章）を不可視テキストとして埋め込んだ派生 PDF を作る。見た目が 1 画素でも変わる、構造が保てない、などの検証に通らなければ保存しません。
+- ⋯ メニューの **「認識した内容を Markdown / LaTeX に書き出す」** で、ページの上から下・左から右の順に並べた原稿（メモも含む）を作る。
+
+### キーボード
+
+| キー | 動作 | キー | 動作 |
+| --- | --- | --- | --- |
+| `S` | 画面を Snip | `R` | ページ上のドラッグ: Snip ⇄ 枠を追加 |
+| `←` `→` `Space` | ページ送り | `F` | ページ全体 ⇄ 幅に合わせる |
+| `+` `-` `0` | 拡大・縮小・元に戻す | `B` | コレクションの開閉 |
+| `C` | 選んだ式をコピー | `Delete` | 選んだ枠を削除（元に戻せる） |
+| `N` / `Shift+N` | 次 / 前の「要確認」 | `/` | 資料を検索 |
+
+### コマンド
 
 ```bash
-.venv/bin/python -m pdf_latex_overlay build-app        # ~/Applications/Alice STEM PDF Reader.app を作る（--dest で場所を変更）
+alice-stem-reader viewer 資料フォルダ/ --backend unimernet     # ビューア（127.0.0.1 のみ）
+alice-stem-reader snip 写真.jpg --mode auto --copy            # 画像 1 枚を読む（--screen で画面の範囲）
+alice-stem-reader prepare 資料フォルダ/ --time-limit 28800    # 開く前にまとめて認識（夜間に。中断・再開可）
+alice-stem-reader convert 本.epub 本.pdf                      # PDF 以外を PDF に（原本は変えない）
+alice-stem-reader formats                                    # この環境で開ける形式と、足りない道具
+alice-stem-reader embed in.pdf out.pdf --formulas f.json     # 数式をコピーできる派生 PDF（検証つき）
 ```
 
-- Finder で PDF を右クリック →「このアプリケーションで開く」→「Alice STEM PDF Reader」。複数のPDFを選んでも、ひとつのビューアに加えて開く。
-- PDF やフォルダを、アプリのアイコンにドロップしても開く。アイコンをダブルクリックすると、**選択画面は出さず**、ビューアが開く。開くものは、ビューアの中の「**＋（PDFまたはフォルダを開く）**」から選ぶ（Finder の選択画面が出る）。追加したフォルダは覚えていて、次の起動でも並ぶ。
-- 既定のPDFアプリ（プレビューなど）は**奪わない**（「別のアプリで開く」の候補に加わるだけ）。常に使いたいときは、Finder の「情報を見る」→「このアプリケーションで開く」で選ぶ。
-- ビューアは1つだけ常駐し、画面（ブラウザ）からの通信が120分なければ自動で終了する。すぐ止めるには `.venv/bin/python -m pdf_latex_overlay app-stop`。ログは `~/Library/Logs/Alice STEM PDF Reader.log`。
-- 同じ中身のPDFは、別のビューアで開いていると開けない（理由をダイアログで知らせる）。
-- アプリは薄い起動部分だけで、プログラムと仮想環境は、**このプロジェクトのもの**を使う（場所を埋め込むので、プロジェクトを動かしたら `build-app` を作り直す）。署名は自分用（ad-hoc）で、配布用ではない。
+`.venv/bin/alice-stem-reader` が入らない環境では `.venv/bin/python -m pdf_latex_overlay …` でも同じです。
 
+## 形式ごとの注意
 
-### 日本語などの文章を読む（PaddleOCR）
+| 形式 | 開き方 | 必要なもの |
+| --- | --- | --- |
+| PDF | そのまま | — |
+| EPUB・MOBI・FB2・XPS・CBZ・SVG | A5・11pt にレイアウトして PDF に（文字層あり） | — |
+| 画像（PNG・JPEG・TIFF〔複数ページ〕・WebP・BMP・GIF） | 1 枚 1 ページ。写真の向きを補正 | — |
+| HEIC（iPhone の写真） | 同上 | macOS は標準で可。他は `pip install 'alice-stem-reader[heic]'` |
+| DjVu | PDF に変換 | DjVuLibre（`brew install djvulibre`） |
+| Markdown・テキスト | 原文をそのまま組版（数式は原文のまま） | — |
+| LaTeX（.tex） | **コンパイルして組版済みの PDF に**（`uplatex`〔日本語の文書クラス〕・`tectonic`・`lualatex`・`xelatex`・`pdflatex` の順に試す。シェルの実行は許可しない）。TeX がない・失敗したときは原文を組版し、理由を記録 | TeX（MacTeX など。任意） |
 
-上部の「**このページの文章を認識**」で、そのページの日本語などの文章を行ごとに読む（数式の枠は塗りつぶして読まない）。文章は**緑の枠**になり、クリックでテキストをコピー・修正できる。数式は、これまでどおり LaTeX で読む。初回はモデルの取得（数百MB）で時間がかかる。「PDFを保存」で、文章も**不可視テキストとして派生PDFに埋め込まれる**（プレビューなどで選択・検索できる。見た目は変わらない）。「確定済みのみ」にすると、確定した文章だけを埋め込む。詳しくは MODELS.md。
+変換した PDF は、元のファイルの中身のハッシュで引くキャッシュに置き、同じ中身なら作り直しません。
 
+## 精度と限界
 
-### 枠の削除・メモ・ビューア専用のフォルダ
+- 数式の認識は [UniMERNet](https://github.com/opendatalab/UniMERNet) base（既定）・tiny、PP-FormulaNet、Mathpix（外部・任意）から選べます。実際の参考書のスキャン 33 式では、base 24 式・tiny 17 式・PP-FormulaNet 8 式が正しく読めました（[記録](docs/MODELS.md)）。**認識の誤りは必ずあります。** 重要な式は、プレビューと元の画像を見比べて確認してください。
+- 「要確認」の印（`--verify`）は、2 つのモデルが同じ間違い方をした式を見逃します。
+- 手書きの読み取りは、字の丁寧さや写真の明るさ・ピントに大きく左右されます。文章の手書き（特に日本語）は、活字ほど正確ではありません。
+- 画面の Snip は macOS のみ（他の環境では、スクリーンショットを貼り付けてください）。
+- CPU では、1 ページの検出と認識に数十秒かかります。よく使う資料は `prepare` で先に処理しておくと、開いてすぐコピーできます。
 
-- **枠の削除**: 枠を選んで、右上の「×」、`Delete` キー、右クリックの「この枠を削除」、右の「削除」ボタン。削除すると、画面の下に「**元に戻す**」が出る（履歴には残る）。⋯ メニューの「このページの文章の枠をすべて削除」「このページの枠をすべて削除」で、ページ単位でまとめて消せる（これも元に戻せる）。
-- **メモ**: 右のパネルの「メモ」に、**このPDF全体**と**ページごと**の補足説明を書ける。入力すると自動で保存する。保存先はライブラリの `notes.json`（Git管理外）で、**PDF自体は変わらない**。
-- **ビューア専用のフォルダ**: コレクションの一番下の「**ビューアのフォルダ**」に、PCのフォルダ構造とは別の構造を自由に作れる（作成・名前変更・入れ子・削除）。PDFは、行を右クリック →「ビューアのフォルダに追加…」、複数選択して「ビューアのフォルダへ」、または**ドラッグ＆ドロップ**で入れる。**実際のファイルは動かさず・コピーもしない**。PDFは中身のハッシュで指すので、PC側でファイルを移動・名前変更しても追従する（見つからないPDFは、取り消し線の行で残り、「このフォルダから外す」で外せる）。同じPDFを、複数のフォルダに入れられる。フォルダを選んで「OCRを行う」もできる。保存先は `collections.json`（ライブラリ、Git管理外）。
+## データとプライバシー
 
+| 置き場所 | 中身 |
+| --- | --- |
+| 資料のフォルダ | 何も作りません（名前の変更・移動・ゴミ箱は、操作したときだけ） |
+| `library/<資料のハッシュ>/` | 式の枠と LaTeX、変更の履歴（`history.jsonl`）、メモ、書き出した PDF |
+| `library/_converted/` | PDF 以外から変換した PDF と、変換の記録 |
+| `library/_snips/` | Snip の画像と記録（出所・エンジン・日時） |
+| `~/Library/Application Support/Alice STEM Reader/` | アプリの設定（追加したフォルダなど） |
 
-### 設定（数式の区切り記号）
+`library/` の場所は環境変数 `PLO_LIBRARY` で変えられます。
 
-上部の歯車ボタン（設定）で、数式の区切りの書き方を選べる。
+- ビューアは `127.0.0.1` だけで待ち受け、起動ごとのトークンがないと操作できません（他の PC からは使えません）。
+- 画面（ブラウザ）は外部と通信しません（Content-Security-Policy で自分自身だけに制限。数式の表示に使う KaTeX も同梱）。
+- Mathpix は、画面の確認ダイアログ、またはコマンドの `--allow-external` で同意したときだけ使います。
 
-- `\( … \)`・`\[ … \]`（既定）／ `$ … $`・`$$ … $$` ／ 付けない。
-- 反映先: **コピーする文字列**（クリックでコピー、コピーボタン）と、**PDFに埋め込む文章の中の数式**（「PDFを保存」）。文章と数式が混ざった枠（`\(…\)` を含む）の中の区切りが、選んだ書き方に変わる。
-- 「数式だけの枠のコピーにも、区切りを付ける」を入れると、数式だけの枠のコピーにも付く（1行は行内、複数行は表示数式）。既定は付けない（これまでどおり）。
-- 設定は、このブラウザに覚える。内部のデータは、どの設定でも変わらない（区切りは、コピー・保存のときに変える）。
+## 依存ソフトウェアとライセンス
 
-### macOS アプリ: 初回の許可
+主な依存: [PyMuPDF](https://pymupdf.readthedocs.io/)（AGPL-3.0）、[pikepdf](https://pikepdf.readthedocs.io/)（MPL-2.0）、[UniMERNet](https://github.com/opendatalab/UniMERNet)（Apache-2.0）、
+[PDF-Extract-Kit MFD](https://github.com/opendatalab/PDF-Extract-Kit) / [ultralytics](https://github.com/ultralytics/ultralytics)（AGPL-3.0）、[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)（Apache-2.0）、
+[KaTeX](https://katex.org/)（MIT、`viewer/static/vendor/katex/` に同梱）、DjVuLibre（GPL、任意・別途導入）。
+配布・組み込みの際は、各ライセンスの条件に従ってください。モデルの重みはリポジトリに含めず、`scripts/setup_models.sh` で配布元から取得します。
 
-`build-app` で作り直すたびに、アプリの署名が変わるため、macOS が「Alice STEM PDF Reader がフォルダ（書類など）にアクセスしようとしています」と**許可を求めることがある**。許可しないと、アプリを開いても何も起きない（許可の画面が出たままになる）。一度許可すれば、次からは出ない（作り直すと、また出ることがある）。
+## 開発
+
+```bash
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/python -m pytest -q                 # 合成データでの試験（モデル不要）
+.venv/bin/python -m pytest -q -m model        # 実モデルを使う試験（導入後）
+```
+
+- [要件と合格基準](docs/REQUIREMENTS.md) ・ [設計](docs/DESIGN.md) ・ [モデルと認識の評価](docs/MODELS.md) ・ [Mathpix との比較検証](docs/MATHPIX_VALIDATION.md) ・ [ロードマップ](docs/ROADMAP.md)
+- アプリから他のプログラムを一緒に起動したいときは、`~/Library/Application Support/Alice STEM Reader/hooks/on-launch` に実行できるファイルを置いてください（アプリを開くたびに裏で実行します）。
+- ほかのアプリから派生 PDF を作る例: [examples/embed_adapter.py](examples/embed_adapter.py)
+
+### 「Failed to fetch」と出たとき
+
+ブラウザが、このPCで動いているビューアに届かなかったときの表示です。ビューアが終了した（120 分操作がなかった、など）か、起動し直して接続先が変わっています。
+アプリをもう一度開くか、コマンドで起動したときに表示された新しい URL を開き直してください。ログは `~/Library/Logs/Alice STEM Reader.log` です。
+
+---
+
+<a id="english"></a>
+
+## English
+
+**Alice STEM Reader** is a local-first STEM document reader. Read textbooks, papers and lecture notes, and **snip any region to get editable LaTeX** (or text with inline math) — ideal for **making flashcards and writing reports and papers** while you read.
+
+- **Snip anything**: a region of the screen (macOS), a region of an open document, or an image (file, paste, drop) — including **photos of handwritten notes**. Results are kept in a history with full **provenance** (document, page, region, SHA-256, engine & version, time) and can be exported as **Markdown, LaTeX, TSV (flashcard apps) or JSON**.
+- **Many formats**: PDF (incl. scans), EPUB, MOBI, FB2, XPS, CBZ, **DjVu**, images (PNG/JPEG/TIFF/HEIC/WebP…), **Markdown** and **LaTeX** (compiled when TeX is available; snipping Markdown/LaTeX source returns the exact source text, no OCR).
+- **Click-to-copy formulas** after page-level detection (PDF-Extract-Kit MFD) and recognition (UniMERNet by default; PP-FormulaNet; Mathpix opt-in), mixed Japanese/English text + math (PaddleOCR), optional two-model cross-check.
+- **Derived PDFs** that look identical to the original but let any PDF viewer copy formulas as LaTeX, published only after appearance/structure/copy verification.
+- **Private by design**: runs on `127.0.0.1` with a per-launch token; the browser UI makes no external requests (strict CSP, KaTeX bundled); originals are never modified.
+- **Launcher apps**: `build-app` creates *Alice STEM Reader.app* (opens the viewer in your browser; appears in Finder's “Open With” for supported formats) and *Alice STEM Snip.app* (screen snip → clipboard; bind it to a hotkey).
+- UI in Japanese, English, Chinese, Spanish and Russian; light/dark themes; keyboard-driven.
+
+Quick start (macOS): see [はじめかた](#はじめかたmacos) above — `pip install -e .`, `scripts/setup_models.sh`, `python -m pdf_latex_overlay build-app`.

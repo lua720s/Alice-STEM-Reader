@@ -1,4 +1,4 @@
-// Alice STEM PDF Reader ローカルビューア。
+// Alice STEM Reader ローカルビューア。
 // OCR 結果やファイル名はデータとして扱う: textContent / textarea にだけ入れ、HTML として解釈しない（アイコンは固定の文字列のみ）。
 "use strict";
 
@@ -423,6 +423,7 @@ window.addEventListener("mouseup", async (ev) => {
   if (d.rubber) d.rubber.remove();
   const vr = [Math.min(x, s0[0]) / s, Math.min(y, s0[1]) / s, Math.max(x, s0[0]) / s, Math.max(y, s0[1]) / s];
   if (vr[2] - vr[0] < 3 || vr[3] - vr[1] < 3) return;
+  if (snipUI.dragMode && !state.redrawFor) { await snipRegion(d.pno, vr); return; }  // Snip: 枠は作らず、読んだ結果を履歴へ
   if (state.redrawFor) {
     const id = state.redrawFor; state.redrawFor = null;
     await act(() => api("POST", `/api/formulas/${encodeURIComponent(id)}`, { view_rect: vr }), T("枠を更新しました（必要なら再認識）"));
@@ -505,7 +506,7 @@ function renderTree() {
   el.textContent = "";
   if (!tree.rows.length) {
     const d = document.createElement("div"); d.className = "tree-empty";
-    d.textContent = q ? T("一致するPDFがありません") : T("PDFがありません");
+    d.textContent = q ? T("一致する資料がありません") : T("資料がありません");
     el.append(d);
   } else {
     el.append(frag);
@@ -514,7 +515,7 @@ function renderTree() {
   updateFocus(false);
   t.roots.forEach(annotate);
   const ready = t.roots.filter((r) => !r.virtual).reduce((a, r) => a + r._done, 0);  // ビューアのフォルダは、同じ PDF を数え直すので除く
-  $("tree-foot").textContent = T("{f} 個のPDF・準備済み {r}", { f: t.files, r: ready }) + (t.hashing > 0 ? T("・状態を確認中 {n}", { n: t.hashing }) : "")
+  $("tree-foot").textContent = T("{f} 件の資料・準備済み {r}", { f: t.files, r: ready }) + (t.hashing > 0 ? T("・状態を確認中 {n}", { n: t.hashing }) : "")
     + (t.truncated ? T("・一部のみ表示（上限）") : "");
   updateSelBar();
 }
@@ -573,7 +574,7 @@ function makeRow(node, key, depth, isFolder, open, label, anc = false) {
   };
   if (isFolder) {
     meta.textContent = node._files ? `${node._done}/${node._files}` : "";
-    row.title = `${label || node.name}\n${T("{f} 個のPDF（準備済み {d}）", { f: node._files, d: node._done })}`;
+    row.title = `${label || node.name}\n${T("{f} 件の資料（準備済み {d}）", { f: node._files, d: node._done })}`;
     row.append(meta);
     chev.addEventListener("click", (ev) => { ev.stopPropagation(); tree.focusKey = key; toggleFolder(node.key); });
     row.addEventListener("click", onClick);
@@ -1020,7 +1021,7 @@ async function actOcr(keys) {
   keys = keys.map((k) => { const n = tree.nodes.get(k); return n && n.virtual && n.type === "file" ? n.id : k; }).filter(Boolean);  // ビューアのフォルダの PDF は、実際の PDF の ID で
   if (noModels()) { toast(T("認識エンジンが未選択です（上の「エンジン」で選ぶか、--backend で起動）"), 4000); return; }
   const n = countFiles(keys);
-  if (!n) { toast(T("対象のPDFがありません")); return; }
+  if (!n) { toast(T("対象の資料がありません")); return; }
   if (n > 1) {
     const r = await ask({ title: T("OCRを行う"), message: T("{n} 個のPDFの数式を検出・認識します。\nCPUでは1ページあたり約40秒かかります。途中でキャンセルでき、あとで続きから再開できます。", { n }), ok: T("始める") });
     if (!r) return;
@@ -1046,7 +1047,7 @@ function toggleSel(key) {
 function updateSelBar() {
   const n = tree.sel.size;
   $("selbar").hidden = n === 0;
-  if (n) $("selcount").textContent = T("{n} 件を選択中（PDF {f} 個）", { n, f: countFiles([...tree.sel]) });
+  if (n) $("selcount").textContent = T("{n} 件を選択中（資料 {f} 件）", { n, f: countFiles([...tree.sel]) });
 }
 
 // ---- OCR の進み具合
@@ -1090,8 +1091,8 @@ async function loadDoc(knownEmpty = false) {
   showDetail(null);
   $("deck").classList.toggle("empty", !doc);
   $("emptydeck").hidden = !!doc;
-  $("docname").textContent = doc ? doc.name : "Alice STEM PDF Reader";
-  document.title = doc ? `${doc.name} – Alice STEM PDF Reader` : "Alice STEM PDF Reader";
+  $("docname").textContent = doc ? doc.name : "Alice STEM Reader";
+  document.title = doc ? `${doc.name} – Alice STEM Reader` : "Alice STEM Reader";
   $("stats").textContent = "";
   $("autostat").textContent = "";
   $("autorun").disabled = !doc || !doc.backend || doc.backend === "none";
@@ -1182,6 +1183,8 @@ function wire() {
   $("docname").addEventListener("click", renameTitle);
   $("docname").addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === "F2") { ev.preventDefault(); renameTitle(); } });
   $("doc-menu").onclick = () => menuAt($("doc-menu"), state.docId ? [...menuItemsFor(state.docId), "-",
+    { label: T("認識した内容を Markdown に書き出す"), run: () => exportDocText("md") },
+    { label: T("認識した内容を LaTeX に書き出す"), run: () => exportDocText("tex") }, "-",
     { label: T("このページの文章の枠をすべて削除"), run: () => deletePageFormulas("text"), danger: true },
     { label: T("このページの枠をすべて削除"), run: () => deletePageFormulas("all"), danger: true }] : []);
   $("tree-newfolder").onclick = () => actNewFolder(defaultFolderKey());
@@ -1231,6 +1234,8 @@ function wire() {
       case "c": if (state.selected) copyLatex(); else handled = false; break;
       case "Delete": case "Backspace": if (state.selected) deleteFormula(state.selected); else handled = false; break;
       case "n": case "N": nextReview(ev.shiftKey || ev.key === "N" ? -1 : 1); break;
+      case "s": snipScreen(); break;
+      case "r": setSnipDrag(!snipUI.dragMode); break;
       default: handled = false;
     }
     if (handled) ev.preventDefault();
@@ -1330,7 +1335,217 @@ async function pickOpen(kind) {
 }
 $("tree-open").addEventListener("click", () => {
   const r = $("tree-open").getBoundingClientRect();
-  showMenu(r.left, r.bottom + 4, [{ label: T("PDFを開く…"), run: () => pickOpen("pdf") }, { label: T("フォルダを追加…"), run: () => pickOpen("folder") }], $("tree-open"));
+  showMenu(r.left, r.bottom + 4, [{ label: T("資料を開く…"), run: () => pickOpen("pdf") }, { label: T("フォルダを追加…"), run: () => pickOpen("folder") }], $("tree-open"));
 });
 $("empty-open-pdf").addEventListener("click", () => pickOpen("pdf"));
 $("empty-open-folder").addEventListener("click", () => pickOpen("folder"));
+
+
+// ============================================================ Snip（画面・画像・ページの範囲を読む。Mathpix Snip に相当）
+// 結果は履歴（ライブラリの _snips/）に、画像・出所・エンジンとともに残る。資料を開いていなくても使える。
+const snipUI = { items: [], limit: 30, dragMode: LS.get("plo-snip-drag", "0") === "1", fresh: null };
+const SNIP_KIND = { math: "数式", mixed: "文章＋数式", text: "文章" };
+function snipMode() { return $("snip-mode").value; }
+$("snip-mode").value = LS.get("plo-snip-mode", "auto");
+$("snip-mode").addEventListener("change", () => LS.set("plo-snip-mode", snipMode()));
+
+function snipSourceLabel(src) {
+  if (!src) return "";
+  if (src.type === "document") return T("{name} {p} ページ", { name: src.name || "", p: (src.page || 0) + 1 });
+  if (src.type === "screen") return T("画面");
+  return src.name || (src.type === "paste" ? T("貼り付けた画像") : T("画像"));
+}
+function snipCopyText(rec, text) {
+  return (rec.kind === "mixed" || rec.kind === "text") ? convertDelims(text, settings.delim) : (settings.single ? wrapSingle(text, settings.delim) : text);
+}
+async function copySnip(rec, text, quiet = false) {
+  const out = snipCopyText(rec, text);
+  if (!out) { if (!quiet) toast(T("コピーする内容がありません")); return false; }
+  try { await navigator.clipboard.writeText(out); if (!quiet) toast(T("コピーしました")); return true; }
+  catch (e) { if (!quiet) toast(T("コピーできませんでした（ブラウザの許可を確認）"), 4000); return false; }
+}
+
+function renderSnipItem(rec) {
+  const el = document.createElement("div"); el.className = "snip-item"; el.setAttribute("role", "listitem"); el.dataset.id = rec.id;
+  if (snipUI.fresh === rec.id) el.classList.add("fresh");
+  const meta = document.createElement("div"); meta.className = "meta";
+  const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = T(SNIP_KIND[rec.kind] || "Snip");
+  const src = document.createElement("span"); src.textContent = snipSourceLabel(rec.source);
+  const sp = document.createElement("span"); sp.className = "spacer";
+  const when = document.createElement("time"); when.textContent = (rec.created || "").slice(5, 16).replace("T", " ");
+  if (rec.engine && rec.engine.name) when.title = `${rec.engine.name} ${rec.engine.version || ""}`.trim();
+  meta.append(kind, src, sp, when);
+  const img = document.createElement("img"); img.alt = T("切り取った画像"); img.loading = "lazy";
+  api("GET", `/api/snips/${encodeURIComponent(rec.id)}.png`).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.remove());
+  const pv = document.createElement("div"); pv.className = "preview";
+  const ta = document.createElement("textarea"); ta.rows = Math.min(6, Math.max(2, (rec.latex || "").split("\n").length + 1)); ta.spellcheck = false;
+  ta.value = rec.latex || ""; ta.setAttribute("aria-label", T("読み取った内容（修正可）"));
+  const draw = () => {
+    pv.textContent = ""; pv.classList.remove("plain"); pv.hidden = false;
+    if (!ta.value) { pv.classList.add("plain"); pv.textContent = rec.error ? T("読み取れませんでした: {m}", { m: rec.error }) : T("（結果なし）"); return; }
+    if (!window.katex) { pv.hidden = true; return; }  // プレビューなし（下の欄に内容がある）
+    const opt = { throwOnError: false, trust: false, strict: "ignore" };
+    if (rec.kind === "math") {
+      const lines = ta.value.split("\n").filter((x) => x.trim());
+      const src2 = lines.length > 1 ? `\\begin{gathered}${lines.join("\\\\")}\\end{gathered}` : ta.value;
+      try { window.katex.render(src2, pv, { ...opt, displayMode: true }); } catch (e) { pv.hidden = true; }
+      return;
+    }
+    // 文章＋数式: 文章はそのまま、\( … \)・\[ … \]・$ … $ の中だけを数式として描く
+    pv.classList.add("plain");
+    const re = /\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
+    let last = 0, m;
+    while ((m = re.exec(ta.value))) {
+      if (m.index > last) pv.append(document.createTextNode(ta.value.slice(last, m.index)));
+      const span = document.createElement("span");
+      const display = m[2] !== undefined || m[3] !== undefined;
+      try { window.katex.render(m[1] || m[2] || m[3] || m[4], span, { ...opt, displayMode: display }); } catch (e) { span.textContent = m[0]; }
+      pv.append(span); last = re.lastIndex;
+    }
+    if (last < ta.value.length) pv.append(document.createTextNode(ta.value.slice(last)));
+  };
+  let saveT = 0;
+  ta.addEventListener("input", () => { draw(); clearTimeout(saveT); saveT = setTimeout(async () => {
+    try { const r = await api("POST", `/api/snips/${encodeURIComponent(rec.id)}`, { latex: ta.value }); Object.assign(rec, r); } catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
+  }, 600); });
+  const acts = document.createElement("div"); acts.className = "acts";
+  const bCopy = document.createElement("button"); bCopy.type = "button"; bCopy.className = "primary"; bCopy.textContent = T("コピー");
+  bCopy.addEventListener("click", () => copySnip(rec, ta.value));
+  acts.append(bCopy);
+  if (rec.text_layer && rec.text_layer !== ta.value) {
+    const bLayer = document.createElement("button"); bLayer.type = "button"; bLayer.textContent = T("文字層を使う");
+    bLayer.title = T("資料に埋め込まれた文字（OCR ではない）に置き換える");
+    bLayer.addEventListener("click", () => { ta.value = rec.text_layer; ta.dispatchEvent(new Event("input")); });
+    acts.append(bLayer);
+  }
+  if (rec.alt_latex) {
+    const bAlt = document.createElement("button"); bAlt.type = "button"; bAlt.textContent = T("もう一方の読み");
+    bAlt.title = rec.alt_latex;
+    bAlt.addEventListener("click", () => { ta.value = rec.alt_latex; ta.dispatchEvent(new Event("input")); });
+    acts.append(bAlt);
+  }
+  const bDel = document.createElement("button"); bDel.type = "button"; bDel.className = "danger"; bDel.textContent = T("削除");
+  bDel.addEventListener("click", async () => {
+    try { await api("DELETE", `/api/snips/${encodeURIComponent(rec.id)}`); snipUI.items = snipUI.items.filter((x) => x.id !== rec.id); renderSnips(); toast(T("削除しました"), 1500); }
+    catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
+  });
+  acts.append(bDel);
+  el.append(meta, img, pv, ta);
+  if (rec.review) { const w = document.createElement("div"); w.className = "warn"; w.textContent = T("要確認: 2つのモデルの読みが食い違いました"); el.append(w); }
+  el.append(acts);
+  draw();
+  return el;
+}
+function renderSnips() {
+  const list = $("sniplist"); list.textContent = "";
+  for (const rec of snipUI.items.slice(0, snipUI.limit)) list.append(renderSnipItem(rec));
+  if (!snipUI.items.length) { const p = document.createElement("p"); p.className = "muted small"; p.textContent = T("まだ Snip はありません。"); list.append(p); }
+  $("snip-more").hidden = snipUI.items.length <= snipUI.limit;
+  $("snip-count").textContent = snipUI.items.length ? T("{n} 件", { n: snipUI.items.length }) : "";
+}
+async function loadSnips() {
+  try { const r = await api("GET", "/api/snips?limit=1000"); snipUI.items = r.items || []; renderSnips(); } catch (e) { /* 次回 */ }
+}
+function addSnip(rec) { snipUI.fresh = rec.id; snipUI.items = [rec, ...snipUI.items.filter((x) => x.id !== rec.id)]; renderSnips(); $("sniplist").scrollTop = 0; }
+function snipBusy(on) { for (const id of ["snip-screen", "snip-top"]) $(id).classList.toggle("busy", on); }
+
+async function snipScreen() {
+  snipBusy(true);
+  toast(T("画面の範囲をドラッグで選んでください（Esc で取り消し）"), 60000);
+  try {
+    const r = await api("POST", "/api/snip/screen", { mode: snipMode(), copy: true, delim: settings.delim, single: settings.single });
+    if (r.cancelled) { toast(T("取り消しました"), 1500); return; }
+    addSnip(r);
+    if (!r.latex) toast(T("読み取れませんでした: {m}", { m: r.error || "" }), 4000);
+    else if (r.copied || await copySnip(r, r.latex, true)) toast(T("読み取って、コピーしました"), 2500);
+    else toast(T("読み取りました（コピーは、履歴の「コピー」から）"), 3500);
+  } catch (e) { toast(T("Snip できませんでした: {m}", { m: e.message }), 6000); }
+  finally { snipBusy(false); }
+}
+async function snipRegion(pno, vr) {
+  toast(T("範囲を読み取っています…"), 30000);
+  try {
+    const r = await api("POST", "/api/snip/region", { page: pno, view_rect: vr, mode: snipMode() });
+    addSnip(r);
+    if (!r.latex) toast(T("読み取れませんでした: {m}", { m: r.error || "" }), 4000);
+    else if (await copySnip(r, r.latex, true)) toast(r.mode === "source" ? T("原文を取り出して、コピーしました") : T("読み取って、コピーしました"), 2500);
+    else toast(T("読み取りました"), 1500);
+  } catch (e) { toast(T("Snip できませんでした: {m}", { m: e.message }), 6000); }
+}
+function readAsDataURL(file) {
+  return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(file); });
+}
+async function snipFiles(files, source) {
+  const imgs = [...files].filter((f) => (f.type || "").startsWith("image/") || /\.(heic|heif)$/i.test(f.name || ""));
+  if (!imgs.length) { toast(T("画像ではありません（資料は、左の「＋」から開きます）"), 3500); return; }
+  for (const [i, f] of imgs.entries()) {
+    toast(T("画像を読み取っています… {i}/{n}", { i: i + 1, n: imgs.length }), 60000);
+    try {
+      const r = await api("POST", "/api/snip/image", { image: await readAsDataURL(f), mode: snipMode(), source, name: f.name || null });
+      addSnip(r);
+      if (imgs.length === 1 && r.latex) { if (await copySnip(r, r.latex, true)) { toast(T("読み取って、コピーしました"), 2500); continue; } }
+    } catch (e) { toast(T("Snip できませんでした: {m}", { m: e.message }), 6000); return; }
+  }
+  if (imgs.length > 1) toast(T("{n} 枚を読み取りました", { n: imgs.length }), 2500);
+  else toast(T("読み取りました"), 1500);
+}
+function setSnipDrag(on) {
+  snipUI.dragMode = on; LS.set("plo-snip-drag", on ? "1" : "0");
+  $("snip-drag").setAttribute("aria-pressed", String(on));
+  $("deck").classList.toggle("snipping", on);
+  toast(on ? T("ページ上のドラッグ: Snip（枠は作らない）") : T("ページ上のドラッグ: 枠を追加"), 1600);
+}
+$("snip-top").addEventListener("click", snipScreen);
+$("snip-screen").addEventListener("click", snipScreen);
+$("snip-drag").addEventListener("click", () => setSnipDrag(!snipUI.dragMode));
+$("snip-drag").setAttribute("aria-pressed", String(snipUI.dragMode));
+$("deck").classList.toggle("snipping", snipUI.dragMode);
+$("snip-file").addEventListener("click", () => $("snip-input").click());
+$("snip-input").addEventListener("change", () => { const fs = $("snip-input").files; if (fs && fs.length) snipFiles(fs, "image"); $("snip-input").value = ""; });
+$("snip-more").addEventListener("click", () => { snipUI.limit += 30; renderSnips(); });
+document.addEventListener("paste", (ev) => {
+  const t = ev.target;
+  if (t && t.closest && t.closest("input, textarea, [contenteditable]")) return;  // 文字の貼り付けは邪魔しない
+  const files = [...((ev.clipboardData && ev.clipboardData.files) || [])];
+  if (!files.some((f) => (f.type || "").startsWith("image/"))) return;
+  ev.preventDefault(); snipFiles(files, "paste");
+});
+for (const id of ["snipbox", "emptydeck"]) {
+  const el = $(id);
+  el.addEventListener("dragover", (ev) => { if (ev.dataTransfer && [...ev.dataTransfer.types].includes("Files")) { ev.preventDefault(); $("snipbox").classList.add("dropping"); } });
+  el.addEventListener("dragleave", () => $("snipbox").classList.remove("dropping"));
+  el.addEventListener("drop", (ev) => {
+    $("snipbox").classList.remove("dropping");
+    if (!ev.dataTransfer || !ev.dataTransfer.files.length) return;
+    ev.preventDefault(); snipFiles(ev.dataTransfer.files, "drop");
+  });
+}
+async function downloadPost(path, body, fallback) {
+  const r = await fetch(path, { method: "POST", headers: { "X-Token": token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `HTTP ${r.status}`); }
+  const cd = r.headers.get("Content-Disposition") || "";
+  const star = cd.match(/filename\*=UTF-8''([^;]+)/);
+  const name = star ? decodeURIComponent(star[1]) : ((cd.match(/filename="([^"]+)"/) || [])[1] || fallback);
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return name;
+}
+async function exportDocText(fmt) {
+  try { const n = await downloadPost("/api/export/text", { fmt, only_confirmed: $("onlyconfirmed").checked }, `export.${fmt}`); toast(T("書き出しました: {n}", { n }), 2500); }
+  catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
+}
+async function exportSnips(fmt) {
+  try {
+    const name = await downloadPost("/api/snips/export", { fmt, delim: settings.delim }, `snips.${fmt}`);
+    toast(T("書き出しました: {n}", { n: name }), 2500);
+  } catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
+}
+$("snip-export").addEventListener("click", () => menuAt($("snip-export"), [
+  { label: T("Markdown（$…$、レポート・ノート向け）"), run: () => exportSnips("md") },
+  { label: T("LaTeX（論文の原稿向け）"), run: () => exportSnips("tex") },
+  { label: T("TSV（フラッシュカードのアプリに読み込む）"), run: () => exportSnips("tsv") },
+  { label: T("JSON（出所・エンジンの記録つき）"), run: () => exportSnips("json") },
+]));
+document.addEventListener("plo-lang", () => renderSnips());
+loadSnips();

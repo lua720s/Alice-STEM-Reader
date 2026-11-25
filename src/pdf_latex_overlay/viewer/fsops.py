@@ -19,8 +19,8 @@ from .session import SessionError
 MAX_NAME_BYTES = 240
 
 
-def clean_name(name, is_file: bool) -> str:
-    """利用者が入力した名前を検査する。PDF は、拡張子 .pdf がなければ付ける。"""
+def clean_name(name, is_file: bool, ext: str = ".pdf") -> str:
+    """利用者が入力した名前を検査する。ファイルは、元の拡張子（既定 .pdf）がなければ付ける。"""
     if not isinstance(name, str):
         raise SessionError("名前が不正")
     n = name.strip()
@@ -28,8 +28,8 @@ def clean_name(name, is_file: bool) -> str:
         raise SessionError("名前に使えない文字がある（/ \\ : や、空の名前は使えない）")
     if n.startswith("."):
         raise SessionError("名前を「.」で始めることはできない（隠しファイルになる）")
-    if is_file and not n.lower().endswith(".pdf"):
-        n += ".pdf"
+    if is_file and ext and not n.lower().endswith(ext.lower()):
+        n += ext
     if len(n.encode("utf-8")) > MAX_NAME_BYTES:
         raise SessionError("名前が長すぎる")
     return n

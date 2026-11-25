@@ -4,31 +4,43 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alice-stem-reader"
-version = "0.1.0"
-description = "元PDFを変えずに、数式をLaTeXとしてコピーできる派生PDFを作る"
+version = "0.2.0"
+description = "Local STEM reader for PDF/EPUB/DjVu/images/Markdown/LaTeX: snip formulas and text to LaTeX/Markdown, entirely on your machine"
 requires-python = ">=3.11"
 dependencies = [
   "pymupdf>=1.24",
   "pikepdf>=8",
   "numpy>=1.26",
   "fonttools>=4.40",  # 日本語の文章を埋め込むサブセットフォント（cjkfont.py）
+  "pillow>=10",  # 画像・手書きの写真・画面の切り取り（docformats.py、snip.py）
+  "markdown>=3.5",  # Markdown の資料を開く（なくても最小限の変換で動く）
+]
+readme = "README.md"
+keywords = ["OCR", "LaTeX", "math", "PDF", "EPUB", "DjVu", "STEM", "snip", "handwriting"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: MacOS",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Text Processing :: Markup :: LaTeX",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "matplotlib>=3.8", "pillow>=10"]
+heic = ["pillow-heif>=0.16"]  # iPhone の写真（HEIC）。macOS では無くても sips で読める
 # UniMERNet は重みとともにプロジェクト内に導入する（MODELS.md 参照）
 ml = ["torch>=2.2", "transformers>=4.40", "pillow>=10"]
 
 [project.scripts]
 alice-stem-reader = "pdf_latex_overlay.cli:main"
-alice-stem-pdf-reader = "pdf_latex_overlay.cli:main"
 pdf-latex-overlay = "pdf_latex_overlay.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-pdf_latex_overlay = ["viewer/static/*"]
+pdf_latex_overlay = ["viewer/static/*", "viewer/static/vendor/katex/*", "viewer/static/vendor/katex/fonts/*", "assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -31,7 +31,7 @@ def shelf(fx, tmp_path):
         doc.set_metadata({"title": rel})
         doc.save(p)
         doc.close()
-    (root / "数学" / "note.txt").write_text("x")
+    (root / "数学" / "note.docx").write_text("x")  # 対応していない形式は出さない
     os.symlink(root / "top.pdf", root / "link.pdf")  # リンクは一覧に出さない
     return root
 

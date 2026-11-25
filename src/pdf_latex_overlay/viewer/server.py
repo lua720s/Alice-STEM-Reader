@@ -23,16 +23,19 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..recognize.base import RecognizerUnavailable
+from ..snip import SnipError
 from .hub import Hub
 from .session import SessionError, ViewerSession, valid_id
 
 STATIC = Path(__file__).resolve().parent / "static"
-STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js", "i18n.js"}
+STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js", "i18n.js", "icon.svg",
+                "vendor/katex/katex.min.js", "vendor/katex/katex.min.css"}
+_VENDOR_FONT = re.compile(r"^vendor/katex/fonts/KaTeX_[A-Za-z0-9_-]+\.woff2$")
 
 
 def make_handler(hub: Hub, token: str, port_ref: dict):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "pdf-latex-overlay-viewer"
+        server_version = "alice-stem-reader"
 
         def log_message(self, fmt, *args):  # 標準エラーへ簡潔に
             sys.stderr.write("viewer: " + (fmt % args) + "\n")
@@ -58,9 +61,9 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
         def _json(self, status: int, obj):
             self._send(status, json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8")
 
-        def _body(self) -> dict:
+        def _body(self, limit: int = 1_000_000) -> dict:
             n = int(self.headers.get("Content-Length") or 0)
-            if n > 1_000_000:
+            if n > limit:
                 raise SessionError("リクエストが大きすぎる", 413)
             if n == 0:
                 return {}
@@ -87,15 +90,18 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
             try:
                 if method == "GET" and not path.startswith("/api/"):
                     name = "index.html" if path == "/" else path.lstrip("/")
-                    if name not in STATIC_FILES:
+                    if name not in STATIC_FILES and not _VENDOR_FONT.match(name):
                         return self._json(404, {"error": "not found"})
-                    body = (STATIC / name).read_bytes()
-                    ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+                    try:
+                        body = (STATIC / name).read_bytes()
+                    except OSError:
+                        return self._json(404, {"error": "not found"})
+                    ctype = "font/woff2" if name.endswith(".woff2") else (mimetypes.guess_type(name)[0] or "application/octet-stream")
                     if name.endswith(".html") or name.endswith(".js") or name.endswith(".css"):
                         ctype += "; charset=utf-8"
-                    csp = ("default-src 'self'; img-src 'self' data: blob:;"
-                           "script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-                           "font-src https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'none'")
+                    # 外部への通信はしない（KaTeX も同梱）。資料の内容がこの PC の外に出ない
+                    csp = ("default-src 'self'; img-src 'self' data: blob:; script-src 'self'; "
+                           "style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'")
                     return self._send(200, body, ctype, {"Content-Security-Policy": csp})
                 if not self._api_ok():
                     return self._json(401, {"error": "token required"})
@@ -153,6 +159,35 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                     if op == "move":
                         return self._json(200, hub.vmove(b.get("items"), b.get("folders"), b.get("dest")))
                     return self._json(404, {"error": "not found"})
+                # ---- Snip（画面・画像の一部を読む。資料を開いていなくても使える）
+                if method == "GET" and path == "/api/formats":
+                    from ..docformats import describe_support
+
+                    return self._json(200, describe_support())
+                if method == "GET" and path == "/api/snips":
+                    lim = int(q.get("limit", ["200"])[0])
+                    return self._json(200, {"items": hub.snips().list(lim), "engine": hub.backend_name})
+                if method == "POST" and path == "/api/snip/image":
+                    b = self._body(limit=40_000_000)  # base64 の画像（25MB まで）
+                    return self._json(200, hub.snip_image(b.get("image"), mode=b.get("mode", "auto"),
+                                                          source=b.get("source", "image"), name=b.get("name")))
+                if method == "POST" and path == "/api/snip/screen":
+                    b = self._body()
+                    return self._json(200, hub.snip_screen(mode=b.get("mode", "auto"), copy=b.get("copy") is not False,
+                                                           delim=b.get("delim", "paren"), single=b.get("single") is True))
+                if method == "POST" and path == "/api/snips/export":
+                    b = self._body()
+                    text, ctype, fname = hub.snips().export(b.get("fmt"), b.get("ids"), delim=b.get("delim", "paren"))
+                    return self._send(200, text.encode("utf-8"), ctype + "; charset=utf-8",
+                                      {"Content-Disposition": f'attachment; filename="{fname}"'})
+                m = re.fullmatch(r"/api/snips/([A-Za-z0-9-]+)(\.png)?", path)
+                if m and method == "GET" and m.group(2):
+                    return self._send(200, hub.snips().image(m.group(1)), "image/png")
+                if m and method == "POST" and not m.group(2):
+                    b = self._body()
+                    return self._json(200, hub.snips().update(m.group(1), latex=b.get("latex"), note=b.get("note")))
+                if m and method == "DELETE" and not m.group(2):
+                    return self._json(200, hub.snips().delete(m.group(1)))
                 if method == "POST" and path == "/api/ocr":
                     b = self._body()
                     return self._json(200, hub.ocr_start(b.get("targets")))
@@ -170,6 +205,9 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "POST" and path == "/api/auto":
                     b = self._body()  # {"pages": [0 始まりのページ番号], "force": true}（省略すると全ページ）
                     return self._json(200, session.start_auto(pages=b.get("pages"), force=bool(b.get("force"))))
+                if method == "POST" and path == "/api/snip/region":
+                    b = self._body()
+                    return self._json(200, hub.snip_region(b.get("page"), b.get("view_rect"), mode=b.get("mode", "auto")))
                 if method == "GET" and path == "/api/notes":
                     return self._json(200, session.notes_get())
                 if method == "POST" and path == "/api/notes":
@@ -205,6 +243,13 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                                                           view_rect=b.get("view_rect"), reason=b.get("reason")))
                 if method == "DELETE" and m and m.group(2) is None:
                     return self._json(200, session.delete(m.group(1)))
+                if method == "POST" and path == "/api/export/text":
+                    b = self._body()
+                    text, ctype, fname = session.export_text(b.get("fmt", "md"), only_confirmed=bool(b.get("only_confirmed")))
+                    from urllib.parse import quote
+
+                    return self._send(200, text.encode("utf-8"), ctype + "; charset=utf-8",
+                                      {"Content-Disposition": f"attachment; filename=\"export.{b.get('fmt', 'md')}\"; filename*=UTF-8''{quote(fname)}"})
                 if method == "POST" and path == "/api/export":
                     b = self._body()
                     mode = b.get("mode", "invisible")
@@ -214,6 +259,8 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                                                           delim=b.get("delim", "paren")))
                 return self._json(404, {"error": "not found"})
             except SessionError as e:
+                return self._json(e.status, {"error": str(e)})
+            except SnipError as e:
                 return self._json(e.status, {"error": str(e)})
             except (ValueError, TypeError) as e:
                 return self._json(400, {"error": str(e)})

@@ -97,8 +97,8 @@ def cmd_app_open(a) -> int:
         if st.get("idle_s", 999) > 8:
             applaunch.webbrowser.open(st["url"])
         return 0
-    from pathlib import Path
-
+    if a.hook:
+        applaunch.run_hook("on-launch")  # 利用者が置いたフック（なければ何もしない）
     files = [p for p in a.paths if not Path(p).expanduser().is_dir()]
     dirs = [p for p in a.paths if Path(p).expanduser().is_dir()]
     try:
@@ -118,10 +118,12 @@ def cmd_app_stop(a) -> int:
 
 
 def cmd_build_app(a) -> int:
-    from .appbuild import build_app
+    from .appbuild import build_app, build_snip_app
 
     try:
         app = build_app(a.dest, register=not a.no_register)
+        if not a.no_snip:
+            print(f"作成した: {build_snip_app(a.dest, register=not a.no_register)}")
     except (RuntimeError, OSError) as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -242,9 +244,11 @@ def cmd_prepare(a) -> int:
     from .prepare import PrepareExit, collect_pdfs, prepare_one
     from .recognize import RecognizerUnavailable, get_backend
 
-    pdfs = collect_pdfs(a.paths, recursive=not a.no_recursive)
+    from .docformats import ConversionError, as_pdf
+
+    pdfs = collect_pdfs(a.paths, recursive=not a.no_recursive, all_formats=True)
     if not pdfs:
-        print("PDF が見つからない", file=sys.stderr)
+        print("PDF などの資料が見つからない", file=sys.stderr)
         return PrepareExit.USAGE
     flag = StopFlag().install()
     t0 = time.monotonic()
@@ -271,9 +275,14 @@ def cmd_prepare(a) -> int:
                 results.append({"pdf": str(pdf), "state": "not_started"})
                 continue
             print(f"[{i}/{len(pdfs)}] {pdf.name}", file=sys.stderr, flush=True)
-            results.append(prepare_one(pdf, detector=det, backend=be, library=a.library, should_stop=stop,
+            try:
+                conv = as_pdf(pdf, a.library)  # EPUB・DjVu・画像などは PDF に変換してから
+            except ConversionError as e:
+                results.append({"pdf": str(pdf), "state": "skipped", "reason": str(e)})
+                continue
+            results.append(prepare_one(conv, detector=det, backend=be, library=a.library, should_stop=stop,
                                        max_pages=a.max_pages, log=lambda m: print(m, file=sys.stderr, flush=True),
-                                       verifier=ver))
+                                       verifier=ver, source=pdf))
     except RecognizerUnavailable as e:
         print(str(e), file=sys.stderr)
         return PrepareExit.MODEL_MISSING
@@ -292,6 +301,97 @@ def cmd_prepare(a) -> int:
     return PrepareExit.OK
 
 
+def cmd_formats(a) -> int:
+    """この環境で開ける形式と、足りない道具。"""
+    from .docformats import describe_support
+
+    _print(describe_support())
+    return 0
+
+
+def cmd_convert(a) -> int:
+    """PDF 以外の資料（EPUB・DjVu・画像・Markdown・LaTeX など）を PDF に変換する（原本は変えない）。"""
+    import shutil as _sh
+
+    from .docformats import ConversionError, as_pdf, conversion_info
+
+    try:
+        out = as_pdf(Path(a.input), a.library)
+    except ConversionError as e:
+        print(str(e), file=sys.stderr)
+        return 4
+    info = conversion_info(out)
+    if a.output:
+        dest = Path(a.output)
+        if dest.exists() and not a.force:
+            print(f"出力先がすでにある（上書きは --force）: {dest}", file=sys.stderr)
+            return 3
+        _sh.copyfile(out, dest)
+        out = dest
+    _print({"output": str(out), **info})
+    return 0
+
+
+def cmd_snip(a) -> int:
+    """画像ファイル（または --screen で画面の範囲）を読んで、LaTeX・文章を出力する。"""
+    from .detect.mfd import MFDDetector
+    from .recognize import RecognizerUnavailable, get_backend
+    from .snip import SnipError, capture_screen, copy_to_clipboard, decode_image, format_for_copy, recognize_snip
+
+    try:
+        if a.screen:
+            raw = capture_screen()
+            if raw is None:
+                return 6
+        elif a.image:
+            raw = Path(a.image).read_bytes()
+        else:
+            print("画像ファイルか --screen を指定する", file=sys.stderr)
+            return 2
+        png = decode_image(raw)
+    except (SnipError, OSError) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    if a.backend == "mathpix" and not a.allow_external:
+        print("Mathpix は画像を外部に送る。同意するなら --allow-external を付ける", file=sys.stderr)
+        return 2
+    be = get_backend(a.backend, **({"allow_external": True} if a.backend == "mathpix" else {}))
+    det = MFDDetector() if a.mode == "auto" else None
+    try:
+        res = recognize_snip(png, backend=be, detector=det, mode=a.mode)
+    except RecognizerUnavailable as e:
+        print(str(e), file=sys.stderr)
+        return 8
+    except SnipError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    finally:
+        for m in (det, be):
+            if m is not None and hasattr(m, "close"):
+                m.close()
+    text = format_for_copy(res, a.delim, a.wrap)
+    if a.json:
+        _print(res)
+    else:
+        print(text)
+    if a.copy:
+        copy_to_clipboard(text)
+    return 0 if res.get("latex") else 5
+
+
+def cmd_app_snip(a) -> int:
+    """（Snip アプリ用）画面の範囲を選んで読み、結果をクリップボードへ。常駐するビューアを使う（なければ起動する）。"""
+    from .applaunch import app_snip
+
+    try:
+        r = app_snip(mode=a.mode, backend=a.backend)
+    except (RuntimeError, ValueError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    _print({k: r.get(k) for k in ("id", "kind", "latex", "copied", "cancelled", "error") if k in r})
+    return 0 if r.get("cancelled") or r.get("latex") else 5
+
+
 def cmd_library(a) -> int:
     from .prepare import list_library
 
@@ -300,7 +400,8 @@ def cmd_library(a) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="pdf-latex-overlay", description="数式をLaTeXとしてコピーできる派生PDFを作る")
+    p = argparse.ArgumentParser(prog="alice-stem-reader",
+                                description="Alice STEM Reader: 資料を読みながら、数式・文章を LaTeX / Markdown として取り出す（すべて手元で動く）")
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -345,18 +446,20 @@ def build_parser() -> argparse.ArgumentParser:
                    help="2つ目のモデル（既定 models/unimernet_tiny）でも読み、食い違った式に「要確認」の印を付ける（約3倍遅い）")
     v.set_defaults(func=cmd_viewer)
 
-    ao = sub.add_parser("app-open", help="（.app 用）動いているビューアでPDFやフォルダを開く。なければ起動する")
-    ao.add_argument("paths", nargs="*", help="PDF またはフォルダ")
+    ao = sub.add_parser("app-open", help="（.app 用）動いているビューアで資料やフォルダを開く。なければ起動する")
+    ao.add_argument("paths", nargs="*", help="資料（PDF・EPUB・画像など）またはフォルダ")
     ao.add_argument("--folder", default=None)
     ao.add_argument("--backend", default="unimernet")
     ao.add_argument("--if-running", action="store_true", help="動いていれば画面を開いて終了コード0、動いていなければ1")
     ao.add_argument("--print-last", action="store_true", help="前回開いたフォルダを表示する")
+    ao.add_argument("--hook", action="store_true", help="起動時のフック（hooks/on-launch）があれば実行する")
     ao.set_defaults(func=cmd_app_open)
     ast = sub.add_parser("app-stop", help="（.app 用）常駐しているビューアを止める")
     ast.set_defaults(func=cmd_app_stop)
-    ba = sub.add_parser("build-app", help="macOS の .app を作る（Finder の「このアプリケーションで開く」に出る）")
+    ba = sub.add_parser("build-app", help="macOS のアプリを作る（Launchpad・Spotlight から開ける。Reader と Snip の2つ）")
     ba.add_argument("--dest", default="~/Applications", help="作る場所（既定: ~/Applications）")
     ba.add_argument("--no-register", action="store_true", help="LaunchServices に登録しない")
+    ba.add_argument("--no-snip", action="store_true", help="画面 Snip 用のアプリ（Alice STEM Snip.app）は作らない")
     ba.set_defaults(func=cmd_build_app)
 
     r = sub.add_parser("recognize", help="式の矩形を切り出して LaTeX を認識する")
@@ -403,6 +506,33 @@ def build_parser() -> argparse.ArgumentParser:
     mp.add_argument("fixtures_dir")
     mp.add_argument("--out-dir", default="outputs/mathpix")
     mp.set_defaults(func=cmd_mathpix_plan)
+
+    fm = sub.add_parser("formats", help="この環境で開ける形式（PDF・EPUB・DjVu・画像・Markdown・LaTeX など）と、足りない道具")
+    fm.set_defaults(func=cmd_formats)
+
+    cv = sub.add_parser("convert", help="PDF 以外の資料を PDF に変換する（原本は変えない。結果はライブラリにも残る）")
+    cv.add_argument("input")
+    cv.add_argument("output", nargs="?", default=None)
+    cv.add_argument("--library", default=None)
+    cv.add_argument("--force", action="store_true")
+    cv.set_defaults(func=cmd_convert)
+
+    sn = sub.add_parser("snip", help="画像（手書きの写真も可）や画面の範囲を読んで、LaTeX・文章を出力する")
+    sn.add_argument("image", nargs="?", default=None)
+    sn.add_argument("--screen", action="store_true", help="画面の範囲をドラッグで選ぶ（macOS）")
+    sn.add_argument("--mode", choices=["auto", "math", "text"], default="auto")
+    sn.add_argument("--backend", default="unimernet", choices=["unimernet", "unimernet_tiny", "ppformulanet", "mathpix"])
+    sn.add_argument("--allow-external", action="store_true")
+    sn.add_argument("--delim", choices=["paren", "dollar", "none"], default="paren")
+    sn.add_argument("--wrap", action="store_true", help="数式だけの結果にも区切りを付ける")
+    sn.add_argument("--copy", action="store_true", help="結果をクリップボードへ（macOS）")
+    sn.add_argument("--json", action="store_true")
+    sn.set_defaults(func=cmd_snip)
+
+    asn = sub.add_parser("app-snip", help="（Snip アプリ用）画面の範囲を読み、結果をクリップボードへ")
+    asn.add_argument("--mode", choices=["auto", "math", "text"], default="auto")
+    asn.add_argument("--backend", default="unimernet")
+    asn.set_defaults(func=cmd_app_snip)
 
     vd = sub.add_parser("verify-derived", help="派生PDFの外観・ページ属性を原本と比べる")
     vd.add_argument("original")

@@ -47,7 +47,7 @@ class PPOCRBackend:
 
     def _check(self):
         if not self.python.exists():
-            raise RecognizerUnavailable(f"PaddleOCR 用 Python がない: {self.python}（MODELS.md の手順で導入）")
+            raise RecognizerUnavailable(f"PaddleOCR 用 Python がない: {self.python}（docs/MODELS.md の手順で導入）")
 
     def start(self):
         if self.proc and self.proc.poll() is None:

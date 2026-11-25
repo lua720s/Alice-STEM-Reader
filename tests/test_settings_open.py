@@ -104,7 +104,7 @@ def test_pick_uses_osascript_and_handles_cancel(fx, tmp_path, monkeypatch):
     assert h.pick("pdf") == {"cancelled": True} and h.roots == []
     fake_run.result = R(0, str(a) + "\n")
     r = h.pick("pdf")
-    assert r["added"] == 1 and h.current_id == r["opened"] and "choose file" in calls[-1][2] and "com.adobe.pdf" in calls[-1][2]
+    assert r["added"] == 1 and h.current_id == r["opened"] and "choose file" in calls[-1][2] and "EPUB" in calls[-1][2]  # PDF 以外の資料も選べる
     fake_run.result = R(0, str(a.parent) + "/\n")
     assert h.pick("folder")["added"] == 1 and "choose folder" in calls[-1][2]
     with pytest.raises(SessionError):

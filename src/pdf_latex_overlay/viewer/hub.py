@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 
-from .. import safety
+from .. import docformats, safety
 from ..prepare import entry_dir, hold_lock, library_root, lock_holder, prepare_one, read_meta, write_meta
 from ..recognize.base import RecognizerUnavailable
 from .fsops import clean_name, move_to_trash
@@ -103,17 +103,20 @@ class Hub:
         self._hash_queue: list[Path] = []
         self._hasher: threading.Thread | None = None
         self._hash_busy = 0
+        self._snip_store = None
+        self._snip_lock = threading.Lock()
+        self._text_backend_override = None  # 試験用（文章の認識）
 
     @classmethod
     def from_session(cls, session: ViewerSession) -> "Hub":
         """1 つのセッションだけを持つ Hub（単体利用と試験用）。ロックや後始末はセッションの持ち主が行う。"""
-        h = cls([session.input], backend="none", backend_obj=session._backend, detector=session._detector,
+        h = cls([session.source], backend="none", backend_obj=session._backend, detector=session._detector,
                 library=session.workdir.parent)
         h.backend_name = session.backend_name  # 表示用（モデルはセッションが持つ）
         h.verify_obj = session._verifier
         h.session = session
-        h.current_id = file_id(session.input)
-        h.index[h.current_id] = session.input
+        h.current_id = file_id(session.source)
+        h.index[h.current_id] = session.source
         return h
 
     # ---------------------------------------------------------------- 走査
@@ -123,14 +126,14 @@ class Hub:
         truncated = False
         for ri, root in enumerate(self.roots):
             if root.is_file():
-                if root.suffix.lower() == ".pdf":
+                if docformats.is_supported(root):
                     files.append((ri, root))
                 continue
             for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
                 dirnames[:] = sorted((d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS), key=natural_key)
                 dirs.append((ri, Path(dirpath)))  # PDF のない（空の）フォルダも一覧に出す
                 for fn in sorted(filenames, key=natural_key):
-                    if fn.startswith(".") or not fn.lower().endswith(".pdf"):
+                    if fn.startswith(".") or not docformats.is_supported(fn):
                         continue
                     p = Path(dirpath) / fn
                     if p.is_symlink():  # 外のファイルを指すリンクは出さない
@@ -166,8 +169,8 @@ class Hub:
         with self.lock:
             for p in paths:
                 q = Path(p).expanduser()
-                if q.is_symlink() or not q.is_file() or q.suffix.lower() != ".pdf":
-                    raise SessionError(f"PDF ではない、または見つからない: {q.name}", 400)
+                if q.is_symlink() or not q.is_file() or not docformats.is_supported(q):
+                    raise SessionError(f"対応していない形式か、見つからない: {q.name}", 400)
                 q = q.resolve()
                 if not any((r.is_file() and r == q) or (r.is_dir() and q.is_relative_to(r)) for r in self.roots):
                     self.roots.append(q)
@@ -208,7 +211,7 @@ class Hub:
             raise SessionError("この環境では、選択画面を出せない（macOS のみ）", 501)
         if kind == "pdf":
             script = ('tell current application to activate\n'
-                      'set fs to choose file of type {"com.adobe.pdf"} with prompt "PDFを選んでください（複数可）" with multiple selections allowed\n'
+                      'set fs to choose file with prompt "資料を選んでください（PDF・EPUB・DjVu・画像・Markdown・LaTeX など。複数可）" with multiple selections allowed\n'
                       'set out to ""\nrepeat with f in fs\nset out to out & POSIX path of f & linefeed\nend repeat\nreturn out')
         else:
             script = ('tell current application to activate\n'
@@ -222,6 +225,9 @@ class Hub:
             return {"cancelled": True}  # キャンセル
         if kind == "folder":
             return {"added": 1, "root": self.add_root(paths[0])}
+        paths = [p for p in paths if docformats.is_supported(p)]
+        if not paths:
+            raise SessionError("対応していない形式（PDF・EPUB・DjVu・画像・Markdown・LaTeX などを選ぶ）", 415)
         ids = self.add_paths(paths)
         self.open(ids[0], auto=False)
         return {"added": len(ids), "opened": ids[0]}
@@ -320,12 +326,17 @@ class Hub:
     def _file_node(self, path: Path) -> dict:
         fid = file_id(path)
         node = {"type": "file", "id": fid, "name": path.name, "state": "unknown", "formulas": None,
-                "with_latex": None, "pages": None, "review": None}
+                "with_latex": None, "pages": None, "review": None, "format": docformats.kind_of(path) or "pdf"}
         try:
             node["size"] = path.stat().st_size
         except OSError:
             pass
         sha = self._cached_sha(path)
+        if sha and docformats.needs_conversion(path):  # 変換した PDF の結果を見る（まだ変換していなければ未処理）
+            conv = docformats.cached_pdf(path, sha, self.library)
+            sha = self._sha(conv) if conv else None
+            if conv is None:
+                node["state"] = "none"
         if sha:
             m = read_meta(entry_dir(path, self.library, sha)[0])
             st = m.get("state")
@@ -522,7 +533,7 @@ class Hub:
     def _do_move(self, src: Path, dest: Path, isdir: bool) -> dict[str, str]:
         """src を dest に動かす。PDF の ID の対応（旧→新）を返す。開いている PDF が動くなら、開き直す。"""
         old = {file_id(p): p for p in self._pdfs_under(src)} if isdir else {file_id(src): src}
-        cur = self.session.input if self.session is not None else None
+        cur = self.session.source if self.session is not None else None
         self._rename_path(src, dest)
         self._rekey_cache(src, dest)
         mapping = {oid: file_id(dest / op.relative_to(src) if isdir else dest) for oid, op in old.items()}
@@ -560,7 +571,7 @@ class Hub:
         with self.lock:
             src, isdir = self._resolve(target)
             self._not_root(src)
-            dest = src.with_name(clean_name(name, not isdir))
+            dest = src.with_name(clean_name(name, not isdir, src.suffix if not isdir else ""))
             if dest == src:
                 raise SessionError("名前が変わっていない")
             if (dest.exists() or dest.is_symlink()) and not (dest.exists() and os.path.samefile(src, dest)):
@@ -610,7 +621,7 @@ class Hub:
                 self._not_root(src)
             dirs = [src for src, isdir in items if isdir]
             items = [(src, isdir) for src, isdir in items if not any(d in src.parents for d in dirs)]
-            cur = self.session.input if self.session is not None else None
+            cur = self.session.source if self.session is not None else None
             if cur is not None and any(cur == src or src in cur.parents for src, _ in items):
                 self._release()
             names = []
@@ -708,7 +719,7 @@ class Hub:
                 job["current"] = item["name"]
                 try:
                     with self.lock:
-                        cur = self.session if (self.session is not None and self.session.input == path) else None
+                        cur = self.session if (self.session is not None and self.session.source == path) else None
                     if cur is not None:  # 開いている PDF は、ビューアのセッションで処理する（結果の書き込みを 1 か所にするため）
                         cur.start_auto()
                         while cur.auto_status()["state"] == "running" and not job["cancel"]:
@@ -717,8 +728,8 @@ class Hub:
                         item["state"] = "cancelled" if job["cancel"] else ("error" if st["state"] == "error" else "done")
                         item["reason"] = st.get("error")
                         continue
-                    r = prepare_one(path, detector=self.detector, backend=self.backend_obj, library=self.library,
-                                    should_stop=lambda: job["cancel"], log=lambda *_: None, verifier=self.verify_obj)
+                    r = prepare_one(self.pdf_for(path), detector=self.detector, backend=self.backend_obj, library=self.library,
+                                    should_stop=lambda: job["cancel"], log=lambda *_: None, verifier=self.verify_obj, source=path)
                     st = r.get("state")
                     if st == "done":
                         item.update(state="done", found=r.get("found", 0), recognized=r.get("recognized", 0),
@@ -733,6 +744,8 @@ class Hub:
                     item.update(state="error", reason=str(e))
                     job["state"] = "error"
                     break
+                except SessionError as e:  # 変換できない（DjVu の道具がない など）
+                    item.update(state="error", reason=str(e))
                 except Exception as e:  # 1 つの PDF の失敗で、残りを止めない
                     item.update(state="error", reason=f"{type(e).__name__}: {e}")
             if job["state"] == "running":
@@ -763,7 +776,7 @@ class Hub:
 
     # ---------------------------------------------------------------- 開く・切り替える
     def _allowed(self, path: Path) -> bool:
-        if path.is_symlink() or not path.is_file() or path.suffix.lower() != ".pdf":
+        if path.is_symlink() or not path.is_file() or not docformats.is_supported(path):
             return False
         rp = path.resolve()
         for root in self.roots:
@@ -786,6 +799,14 @@ class Hub:
                 finally:
                     self._lock_cm = None
 
+    def pdf_for(self, path: Path) -> Path:
+        """開くための PDF（PDF 以外は変換して、ライブラリにキャッシュする）。"""
+        try:
+            src_sha = self._sha(path) if docformats.needs_conversion(path) else None
+            return docformats.as_pdf(path, self.library, src_sha)
+        except docformats.ConversionError as e:
+            raise SessionError(str(e), 422) from e
+
     def open(self, fid: str, formulas_path=None, workdir=None, auto: bool | None = None) -> ViewerSession:
         if not isinstance(fid, str) or not _ID_RE.match(fid):
             raise SessionError("ID が不正")
@@ -798,8 +819,9 @@ class Hub:
                 path = self.index.get(fid)
             if path is None or not self._allowed(path):
                 raise SessionError("その PDF は一覧にない", 404)
-            sha = self._sha(path)
-            d = Path(workdir) if workdir else entry_dir(path, self.library, sha)[0]
+            pdf = self.pdf_for(path)
+            sha = self._sha(pdf)
+            d = Path(workdir) if workdir else entry_dir(pdf, self.library, sha)[0]
             d.mkdir(parents=True, exist_ok=True)
             holder = lock_holder(d / ".viewer.lock")
             if holder and holder != os.getpid():
@@ -808,9 +830,9 @@ class Hub:
             cm = hold_lock(d / ".viewer.lock")
             cm.__enter__()
             try:
-                session = ViewerSession(path, d, formulas_path, backend=self.backend_name,
+                session = ViewerSession(pdf, d, formulas_path, backend=self.backend_name,
                                         backend_obj=self.backend_obj, detector_obj=self.detector,
-                                        verifier_obj=self.verify_obj)
+                                        verifier_obj=self.verify_obj, source=path)
             except BaseException:
                 cm.__exit__(None, None, None)
                 raise
@@ -824,6 +846,109 @@ class Hub:
             if (self.auto_on_open if auto is None else auto) and self.backend_name not in (None, "", "none"):
                 session.start_auto()
             return session
+
+    # ---------------------------------------------------------------- Snip（画面・画像・資料の一部を読む）
+    def snips(self):
+        from ..snip import SnipStore
+
+        with self.lock:
+            if self._snip_store is None:
+                self._snip_store = SnipStore(library_root(self.library) / "_snips")
+            return self._snip_store
+
+    def _snip_models(self):
+        if self.backend_obj is None or self.backend_name in (None, "", "none"):
+            raise SessionError("認識エンジンが選ばれていない（画面の「エンジン」で選ぶか、--backend で起動）", 409)
+        if self.detector is None and self._own_models:
+            from ..detect.mfd import MFDDetector
+
+            self.detector = MFDDetector()
+        return self.backend_obj, self.detector
+
+    def _engine_info(self) -> dict:
+        return {"name": self.backend_name, "version": getattr(self.backend_obj, "version", "?")}
+
+    def _run_snip(self, png: bytes, mode: str, **kw) -> dict:
+        from ..snip import SnipError, recognize_snip
+
+        backend, detector = self._snip_models()
+        try:
+            with self._snip_lock:  # 認識のワーカーは 1 つずつ使う
+                return recognize_snip(png, backend=backend, detector=detector, verifier=self.verify_obj, mode=mode,
+                                      text_backend=self._text_backend_override, **kw)
+        except SnipError as e:
+            raise SessionError(str(e), e.status) from e
+        except RecognizerUnavailable as e:
+            raise SessionError(str(e), 503) from e
+
+    def snip_image(self, data, mode: str = "auto", source: str = "image", name=None) -> dict:
+        """貼り付け・ドロップ・選んだ画像（手書きのノートの写真なども）を読む。"""
+        from ..snip import SnipError, decode_image
+
+        if source not in ("image", "paste", "drop"):
+            source = "image"
+        try:
+            png = decode_image(data)
+        except SnipError as e:
+            raise SessionError(str(e), e.status) from e
+        res = self._run_snip(png, mode)
+        nm = Path(name).name.strip()[:200] if isinstance(name, str) else ""
+        src = {"type": source, "name": nm or None}
+        return self.snips().add(png, res, src, self._engine_info(), {"mode": mode})
+
+    def snip_screen(self, mode: str = "auto", copy: bool = True, delim: str = "paren", single: bool = False,
+                    capture=None) -> dict:
+        """画面の範囲を選んで読み、結果をクリップボードへ（macOS）。取り消したら {"cancelled": True}。"""
+        from ..snip import SnipError, capture_screen, copy_to_clipboard, format_for_copy
+
+        self._snip_models()  # エンジンがなければ、切り取る前に知らせる
+        try:
+            raw = (capture or capture_screen)()
+            if raw is None:
+                return {"cancelled": True}
+            from ..snip import decode_image
+
+            png = decode_image(raw)
+        except SnipError as e:
+            raise SessionError(str(e), e.status) from e
+        res = self._run_snip(png, mode)
+        rec = self.snips().add(png, res, {"type": "screen"}, self._engine_info(), {"mode": mode})
+        rec = dict(rec, copied=bool(copy and rec.get("latex") and copy_to_clipboard(format_for_copy(rec, delim, single))))
+        return rec
+
+    def snip_region(self, page, view_rect, mode: str = "auto") -> dict:
+        """開いている資料の範囲を読む（枠は作らない）。文字層があれば、その文字も返す。
+
+        Markdown・テキスト・原文表示の LaTeX は、文字層が原文そのものなので、auto では OCR を使わずに原文を返す。
+        """
+        import pymupdf
+
+        from ..recognize.base import crop_png
+        from ..snip import text_layer
+
+        session = self.require()
+        with session.lock:
+            if isinstance(page, bool) or not isinstance(page, int):
+                raise SessionError("page が不正")
+            pg = session._page(page)
+            rect = session._to_stored(page, view_rect)
+            view = tuple(pymupdf.Rect(rect) * pg.rotation_matrix)
+            png = crop_png(pg, rect, dpi=200)
+            layer = text_layer(pg, view)
+            boxes = session._page_boxes.get(page)
+        info = session.doc_info()
+        conv = (info.get("conversion") or {}).get("method", "")
+        src = {"type": "document", "name": session.source.name, "page": page, "rect": [round(v, 2) for v in view],
+               "sha256": session.input_sha, "format": info.get("format")}
+        if mode == "auto" and layer and (info.get("format") in ("markdown", "text") or conv == "latex:source"):
+            res = {"kind": "text", "latex": layer, "raw": layer, "review": None, "alt": None, "error": None}
+            return self.snips().add(png, res, src, {"name": "text-layer", "version": "-"}, {"mode": "source", "text_layer": layer})
+        doc = pymupdf.open(session.input)  # この処理専用（PyMuPDF の文書はスレッド間で共有しない）
+        try:
+            res = self._run_snip(png, mode, page=doc[page], view_rect=view, boxes=boxes)
+        finally:
+            doc.close()
+        return self.snips().add(png, res, src, self._engine_info(), {"mode": mode, "text_layer": layer or None})
 
     def require(self) -> ViewerSession:
         with self.lock:

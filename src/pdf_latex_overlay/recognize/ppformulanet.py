@@ -48,9 +48,9 @@ class PPFormulaNetBackend:
 
     def _check(self):
         if not self.python.exists():
-            raise RecognizerUnavailable(f"PP-FormulaNet 用 Python がない: {self.python}（MODELS.md の手順で導入）")
+            raise RecognizerUnavailable(f"PP-FormulaNet 用 Python がない: {self.python}（docs/MODELS.md の手順で導入）")
         if not (self.model_dir / "inference.pdiparams").is_file():
-            raise RecognizerUnavailable(f"PP-FormulaNet の重みがない: {self.model_dir}（MODELS.md の手順で取得）")
+            raise RecognizerUnavailable(f"PP-FormulaNet の重みがない: {self.model_dir}（docs/MODELS.md の手順で取得）")
 
     def start(self):
         if self.proc and self.proc.poll() is None:

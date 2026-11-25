@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Alice STEM PDF Reader</title>
+<title>Alice STEM Reader</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <script src="theme.js"></script>
 <link rel="stylesheet" href="style.css">
-<!-- 数式プレビュー用（任意）。読み込めなければプレビューなしで動く -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<!-- 数式プレビュー（KaTeX 0.16.11、MIT。同梱しているので、ネットワークに接続しなくても動く） -->
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<script defer src="vendor/katex/katex.min.js"></script>
 <script defer src="i18n.js"></script>
 <script defer src="app.js"></script>
 </head>
@@ -19,7 +20,7 @@
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>
   </button>
   <div class="title">
-    <strong id="docname" tabindex="0" title="クリックして名前を変更" data-i18n-title="クリックして名前を変更">Alice STEM PDF Reader</strong>
+    <strong id="docname" tabindex="0" title="クリックして名前を変更" data-i18n-title="クリックして名前を変更">Alice STEM Reader</strong>
     <span id="stats" class="muted"></span>
     <button id="reviewbtn" class="review-btn" type="button" hidden title="次の要確認へ（N、前へは Shift+N）" data-i18n-title="次の要確認へ（N、前へは Shift+N）"><span id="reviewcount"></span></button>
   </div>
@@ -28,6 +29,10 @@
   </button>
   <span class="spacer"></span>
   <span id="autostat" class="status" role="status"></span>
+  <button id="snip-top" type="button" class="snip-btn" title="画面の一部を Snip して読む（S）" aria-label="画面を Snip" data-i18n-title="画面の一部を Snip して読む（S）" data-i18n-label="画面を Snip">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></svg>
+    <span>Snip</span>
+  </button>
   <select id="engine" title="認識エンジン（式の読み取りに使うモデル）" aria-label="認識エンジン" data-i18n-title="認識エンジン（式の読み取りに使うモデル）" data-i18n-label="認識エンジン"></select>
   <button id="autorun" title="いま表示しているページの数式を検出して認識する（PDF全体は、⋯ の「OCRを行う」）" data-i18n-title="いま表示しているページの数式を検出して認識する（PDF全体は、⋯ の「OCRを行う」）" data-i18n="このページを認識">このページを認識</button>
   <button id="textrun" title="いま表示しているページの文章（日本語など）を読み取る。数式の枠は読まない" data-i18n-title="いま表示しているページの文章（日本語など）を読み取る。数式の枠は読まない" data-i18n="このページの文章を認識">このページの文章を認識</button>
@@ -57,7 +62,7 @@
     <div class="sb-head">
       <span class="sb-title" data-i18n="コレクション">コレクション</span>
       <span class="spacer"></span>
-      <button id="tree-open" class="icon-btn small" title="PDFまたはフォルダを開く" aria-label="PDFまたはフォルダを開く" data-i18n-title="PDFまたはフォルダを開く" data-i18n-label="PDFまたはフォルダを開く" aria-haspopup="menu">
+      <button id="tree-open" class="icon-btn small" title="資料またはフォルダを開く" aria-label="資料またはフォルダを開く" data-i18n-title="資料またはフォルダを開く" data-i18n-label="資料またはフォルダを開く" aria-haspopup="menu">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
       </button>
       <button id="tree-newfolder" class="icon-btn small" title="新しいフォルダ" aria-label="新しいフォルダ" data-i18n-title="新しいフォルダ" data-i18n-label="新しいフォルダ">
@@ -73,7 +78,7 @@
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
       </button>
     </div>
-    <div class="sb-search"><input id="tree-filter" type="search" placeholder="PDFを検索（/）" aria-label="PDFを検索" autocomplete="off" spellcheck="false" data-i18n-label="PDFを検索" data-i18n-ph="PDFを検索（/）"></div>
+    <div class="sb-search"><input id="tree-filter" type="search" placeholder="資料を検索（/）" aria-label="資料を検索" autocomplete="off" spellcheck="false" data-i18n-label="資料を検索" data-i18n-ph="資料を検索（/）"></div>
     <div id="tree" role="tree" aria-label="PDFの一覧" data-i18n-label="PDFの一覧"></div>
     <div id="selbar" hidden>
       <span id="selcount"></span>
@@ -96,9 +101,9 @@
       <div id="pages"></div>
       <div id="emptydeck">
         <div>
-          <p class="big" data-i18n="PDFを選んでください">PDFを選んでください</p>
-          <p><button id="empty-open-pdf" type="button" class="primary" data-i18n="PDFを開く…">PDFを開く…</button> <button id="empty-open-folder" type="button" data-i18n="フォルダを追加…">フォルダを追加…</button></p>
-          <p class="muted"><span data-i18n="左のコレクションからPDFを選ぶと、ページが1枚ずつ表示されます。"></span><br>
+          <p class="big" data-i18n="資料を選んでください">資料を選んでください</p>
+          <p><button id="empty-open-pdf" type="button" class="primary" data-i18n="資料を開く…">資料を開く…</button> <button id="empty-open-folder" type="button" data-i18n="フォルダを追加…">フォルダを追加…</button></p>
+          <p class="muted"><span data-i18n="左のコレクションから資料（PDF・EPUB・DjVu・画像・Markdown・LaTeX など）を選ぶと、ページが1枚ずつ表示されます。"></span><br>
             <kbd>←</kbd><kbd>→</kbd> <span data-i18n="でページ送り、"></span><kbd>F</kbd> <span data-i18n="で表示の切り替え、"></span><kbd>B</kbd> <span data-i18n="でコレクションの開閉。"></span></p>
         </div>
       </div>
@@ -132,6 +137,30 @@
     </section>
 
     <aside id="panel">
+      <section id="snipbox" aria-labelledby="snip-title">
+        <div class="snip-head">
+          <h2 id="snip-title">Snip</h2>
+          <span class="spacer"></span>
+          <select id="snip-mode" aria-label="読み方" title="読み方（自動: 文章と数式を見分ける）" data-i18n-label="読み方" data-i18n-title="読み方（自動: 文章と数式を見分ける）">
+            <option value="auto" data-i18n="自動（文章＋数式）">自動（文章＋数式）</option>
+            <option value="math" data-i18n="数式（LaTeX）">数式（LaTeX）</option>
+            <option value="text" data-i18n="文章">文章</option>
+          </select>
+        </div>
+        <div class="snip-actions">
+          <button id="snip-screen" type="button" class="primary" title="画面の範囲をドラッグで選んで読む。結果はクリップボードへ（S）" data-i18n-title="画面の範囲をドラッグで選んで読む。結果はクリップボードへ（S）" data-i18n="画面を Snip">画面を Snip</button>
+          <button id="snip-drag" type="button" aria-pressed="false" title="ページ上のドラッグを、枠の追加ではなく Snip にする（R）" data-i18n-title="ページ上のドラッグを、枠の追加ではなく Snip にする（R）" data-i18n="ページの範囲">ページの範囲</button>
+          <button id="snip-file" type="button" title="画像（手書きのノートの写真なども）を選んで読む" data-i18n-title="画像（手書きのノートの写真なども）を選んで読む" data-i18n="画像…">画像…</button>
+          <input id="snip-input" type="file" accept="image/*,.heic,.heif" multiple hidden>
+        </div>
+        <p class="muted small" id="snip-hint" data-i18n="画像は ⌘V / Ctrl+V で貼り付け、またはここへドロップしても読めます。">画像は ⌘V / Ctrl+V で貼り付け、またはここへドロップしても読めます。</p>
+        <div id="sniplist" role="list" aria-label="Snip の履歴" data-i18n-label="Snip の履歴"></div>
+        <div class="row snip-foot">
+          <button id="snip-export" type="button" aria-haspopup="menu" data-i18n="書き出す…">書き出す…</button>
+          <button id="snip-more" type="button" hidden data-i18n="さらに表示">さらに表示</button>
+          <span class="muted small" id="snip-count"></span>
+        </div>
+      </section>
       <div id="empty" class="muted"><span data-i18n="PDFを開いたら、上の「このページを認識」で数式を検出・認識します（PDF全体は、⋯ の「OCRを行う」）。"></span><br>
         <span data-i18n="枠をクリックするとLaTeXをコピーし、ここで確認・修正できます。見落とした式は、ページ上をドラッグして追加できます（複数行も可）。"></span></div>
       <details id="notes" open>
