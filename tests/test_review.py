@@ -7,14 +7,14 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from pdf_latex_overlay.cli import main
-from pdf_latex_overlay.models import Formula, FormulaSet
-from pdf_latex_overlay.recognize import FixedBackend, Recognition, RecognizerUnavailable
-from pdf_latex_overlay.recognize.region import recognize_png
-from pdf_latex_overlay.recognize.runner import RecognizeExit, run_recognition
-from pdf_latex_overlay.recognize.verify import normalize_math, review_flag, same_math
-from pdf_latex_overlay.viewer.hub import Hub
-from pdf_latex_overlay.viewer.session import SessionError, ViewerSession
+from alice_stem_reader.cli import main
+from alice_stem_reader.models import Formula, FormulaSet
+from alice_stem_reader.recognize import FixedBackend, Recognition, RecognizerUnavailable
+from alice_stem_reader.recognize.region import recognize_png
+from alice_stem_reader.recognize.runner import RecognizeExit, run_recognition
+from alice_stem_reader.recognize.verify import normalize_math, review_flag, same_math
+from alice_stem_reader.viewer.hub import Hub
+from alice_stem_reader.viewer.session import SessionError, ViewerSession
 
 
 # ------------------------------------------------------------------ 食い違いの判定
@@ -154,7 +154,7 @@ def test_auto_recognition_marks_and_review_clears_when_a_human_acts(fx, tmp_path
     n = len(fl)  # 検出された枠は、行ごとに分かれる
     assert n >= 2 and all(f["review"] == "disagree" and f["alt_latex"] == "x^{3}" for f in fl)
     # 保存済みのメタ（コレクションの一覧に出る件数）
-    from pdf_latex_overlay.prepare import read_meta
+    from alice_stem_reader.prepare import read_meta
 
     assert read_meta(s.workdir)["counts"]["review"] == n
     a, b = fl[0]["id"], fl[1]["id"]
@@ -235,13 +235,13 @@ def test_hub_tree_shows_review_counts(fx, tmp_path):
 def test_hub_verify_needs_a_backend_and_a_model(tmp_path, monkeypatch):
     with pytest.raises(SessionError):
         Hub([tmp_path], verify=True)  # --backend なし
-    monkeypatch.setenv("PLO_VERIFY_DIR", str(tmp_path / "nomodel"))
+    monkeypatch.setenv("ASR_VERIFY_DIR", str(tmp_path / "nomodel"))
     with pytest.raises(RecognizerUnavailable):
         Hub([tmp_path], backend="unimernet", verify=True)  # 検証用の重みがない
 
 
 def test_cli_verify_fails_cleanly_when_model_is_missing(fx, tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("PLO_VERIFY_DIR", str(tmp_path / "nomodel"))
+    monkeypatch.setenv("ASR_VERIFY_DIR", str(tmp_path / "nomodel"))
     pdf = tmp_path / "a.pdf"
     shutil.copy(fx["scan"], pdf)
     assert main(["viewer", str(pdf), "--backend", "unimernet", "--verify", "--no-open"]) == 8
@@ -270,7 +270,7 @@ def test_runner_stores_alt_and_review(fx, tmp_path):
 
 
 def test_static_ui_has_review_marker():
-    static = Path(__file__).resolve().parents[1] / "src" / "pdf_latex_overlay" / "viewer" / "static"
+    static = Path(__file__).resolve().parents[1] / "src" / "alice_stem_reader" / "viewer" / "static"
     html = (static / "index.html").read_text(encoding="utf-8")
     js = (static / "app.js").read_text(encoding="utf-8")
     css = (static / "style.css").read_text(encoding="utf-8")

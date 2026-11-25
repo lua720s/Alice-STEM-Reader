@@ -6,10 +6,10 @@ import time
 import pymupdf
 import pytest
 
-from pdf_latex_overlay.detect.mfd import ROOT, MFDDetector, detect_page
-from pdf_latex_overlay.models import FormulaSet
-from pdf_latex_overlay.recognize import FixedBackend
-from pdf_latex_overlay.viewer.session import ViewerSession
+from alice_stem_reader.detect.mfd import ROOT, MFDDetector, detect_page
+from alice_stem_reader.models import FormulaSet
+from alice_stem_reader.recognize import FixedBackend
+from alice_stem_reader.viewer.session import ViewerSession
 
 
 class FakeDetector:
@@ -72,7 +72,7 @@ def test_auto_detects_and_recognizes_all_pages(fx, tmp_path):
 
 
 def test_auto_without_backend_is_refused(fx, tmp_path):
-    from pdf_latex_overlay.viewer.session import SessionError
+    from alice_stem_reader.viewer.session import SessionError
     src = tmp_path / "s.pdf"
     shutil.copy(fx["scan"], src)
     s = ViewerSession(src, tmp_path / "w")
@@ -88,12 +88,12 @@ HAVE_MFD = (ROOT / "models" / "mfd_yolo_v8" / "yolo_v8_ft.pt").is_file() and (RO
 @pytest.mark.skipif(not HAVE_MFD, reason="数式検出モデルが未導入")
 def test_mfd_real_on_fixture(fx):
     """実モデル: 合成フィクスチャの表示数式の多くを見つける（回転ページを含む）。"""
-    from pdf_latex_overlay.evaluate import compare_regions
+    from alice_stem_reader.evaluate import compare_regions
     doc = pymupdf.open(fx["scan"])
     truth = FormulaSet.load(fx["scan_json"])
     det = MFDDetector()
     found = FormulaSet()
-    from pdf_latex_overlay.models import Formula
+    from alice_stem_reader.models import Formula
     for pno in range(doc.page_count):
         for n, d in enumerate(detect_page(det, doc[pno]), 1):
             found.formulas.append(Formula(id=f"a{pno}_{n}", page=pno, rect=d["rect"]))

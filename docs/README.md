@@ -5,5 +5,4 @@ Design, evaluation and validation records. For installation and usage, see the [
 - [Requirements and acceptance criteria](REQUIREMENTS.md)
 - [Design (modules, PDF embedding, viewer, non-PDF documents, Snip, shortcuts)](DESIGN.md)
 - [Models and recognition: evaluation record (UniMERNet, MFD, PP-FormulaNet, PaddleOCR, Mathpix)](MODELS.md)
-- [Mathpix validation record](MATHPIX_VALIDATION.md)
 - [Roadmap](ROADMAP.md)

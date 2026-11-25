@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-STATIC = Path(__file__).resolve().parents[1] / "src" / "pdf_latex_overlay" / "viewer" / "static"
+STATIC = Path(__file__).resolve().parents[1] / "src" / "alice_stem_reader" / "viewer" / "static"
 I18N = (STATIC / "i18n.js").read_text(encoding="utf-8")
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 JS = "\n".join((STATIC / f).read_text(encoding="utf-8") for f in ("app.js", "dashboard.js"))
@@ -45,6 +45,6 @@ def test_five_languages_and_served():
     for code in ("ja", "en", "zh", "es", "ru"):
         assert f'["{code}",' in I18N
     assert 'id="lang"' in HTML and "i18n.js" in HTML
-    from pdf_latex_overlay.viewer.server import STATIC_FILES
+    from alice_stem_reader.viewer.server import STATIC_FILES
 
     assert "i18n.js" in STATIC_FILES

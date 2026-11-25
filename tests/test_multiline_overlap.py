@@ -7,12 +7,12 @@ import pymupdf
 import pytest
 from PIL import Image, ImageDraw
 
-from pdf_latex_overlay import Options, copycheck, embed, process_pdf
-from pdf_latex_overlay.models import Formula, FormulaSet
-from pdf_latex_overlay.recognize import FixedBackend, Recognition
-from pdf_latex_overlay.recognize.postprocess import clean_latex, looks_degenerate, split_lines
-from pdf_latex_overlay.recognize.region import recognize_region
-from pdf_latex_overlay.viewer.session import ViewerSession
+from alice_stem_reader import Options, copycheck, embed, process_pdf
+from alice_stem_reader.models import Formula, FormulaSet
+from alice_stem_reader.recognize import FixedBackend, Recognition
+from alice_stem_reader.recognize.postprocess import clean_latex, looks_degenerate, split_lines
+from alice_stem_reader.recognize.region import recognize_region
+from alice_stem_reader.viewer.session import ViewerSession
 
 USER_EXAMPLE = (r"\begin{array}{c}{{\overline{{{\bf\Pi}}}=\displaystyle{\frac{\bf\Pi}{2}}x^{2}(\log x)^{2}}\!\!-\!"
                 r"\displaystyle{\frac{1}{2}}x^{2}\log x+\!\!\int\!\!\frac{1}{2}xdx}}\\{{\displaystyle{\frac{\bf\Pi}{2}}"
@@ -76,7 +76,7 @@ def test_split_lines_counts():
 
 def test_split_keeps_limits_on_fixture(fx):
     """∑ の上端・下端は行として分けない（合成フィクスチャの全式で1行）。"""
-    from pdf_latex_overlay.recognize import crop_png
+    from alice_stem_reader.recognize import crop_png
     for v in ("scan", "vector"):
         fs = FormulaSet.load(fx[f"{v}_json"])
         doc = pymupdf.open(fx[v])
@@ -185,5 +185,5 @@ def test_saving_unchanged_multiline_is_not_edited(tmp_path, fx):
 
 def test_junk_line_from_recognizer_is_dropped():
     """空白だけの行（`\\mathrm{~}`）は、複数行の結果から落とす（実教材で発生）。"""
-    from pdf_latex_overlay.recognize.postprocess import clean_lines
+    from alice_stem_reader.recognize.postprocess import clean_lines
     assert clean_lines("=\\frac{1}{4}(e^{2}-1)\n\\mathrm{~}") == "=\\frac{1}{4}(e^{2}-1)"

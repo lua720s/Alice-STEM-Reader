@@ -31,4 +31,4 @@ CLAUDE.md
 .private/
 
 # アプリのアイコン（同梱）
-!src/pdf_latex_overlay/assets/*.png
+!src/alice_stem_reader/assets/*.png

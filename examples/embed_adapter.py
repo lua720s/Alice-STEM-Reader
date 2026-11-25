@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from pdf_latex_overlay import ExitCode, Options, process_pdf
+from alice_stem_reader import ExitCode, Options, process_pdf
 
 
 def make_latex_copyable_asset(source_pdf: Path, formulas_json: Path, asset_dir: Path) -> dict:

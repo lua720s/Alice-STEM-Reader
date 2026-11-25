@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_latex_overlay import appbuild, applaunch, hotkeys, osutil
+from alice_stem_reader import appbuild, applaunch, hotkeys, osutil
 
 
 def test_paths_per_os(monkeypatch, tmp_path):
@@ -96,7 +96,7 @@ def test_app_window_uses_chromium_with_own_profile(monkeypatch, tmp_path):
 
 
 def test_open_ui_follows_setting(monkeypatch, tmp_path):
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
     opened = []
     monkeypatch.setattr(applaunch.webbrowser, "open", lambda u: opened.append(("browser", u)))
     monkeypatch.setattr(osutil, "open_app_window", lambda u, prof: opened.append(("app", u)) or "chrome")
@@ -131,7 +131,7 @@ def test_hotkey_agent_explains_wayland(monkeypatch, capsys):
 def test_linux_launchers(tmp_path):
     made = appbuild.build_linux(python="/opt/my venv/bin/python", start_at_login=True, register=False, home=tmp_path)
     reader = (tmp_path / ".local/share/applications/alice-stem-reader.desktop").read_text(encoding="utf-8")
-    assert 'Exec="/opt/my venv/bin/python" -m pdf_latex_overlay app-open --hook %F' in reader
+    assert 'Exec="/opt/my venv/bin/python" -m alice_stem_reader app-open --hook %F' in reader
     assert "MimeType=application/pdf;application/epub+zip;" in reader and "image/vnd.djvu" in reader and "text/x-tex" in reader
     assert "[Desktop Action snip]" in reader and (tmp_path / ".local/share/icons/hicolor/256x256/apps/alice-stem-reader.png").is_file()
     assert any(p.name == "alice-stem-hotkeys.desktop" for p in made)
@@ -140,7 +140,7 @@ def test_linux_launchers(tmp_path):
 
 def test_windows_launchers_use_powershell_shortcuts(monkeypatch, tmp_path):
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
     calls = []
     monkeypatch.setattr(appbuild.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
     made = appbuild.build_windows(python=str(tmp_path / "Scripts" / "python.exe"), start_at_login=True)
@@ -153,8 +153,8 @@ def test_windows_launchers_use_powershell_shortcuts(monkeypatch, tmp_path):
 
 
 def test_hook_on_windows_runs_cmd_file(monkeypatch, tmp_path):
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
-    monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "log" / "app.log"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_LOG", str(tmp_path / "log" / "app.log"))
     monkeypatch.setattr(osutil, "IS_WIN", True)
     launched = []
     monkeypatch.setattr(applaunch.subprocess, "Popen", lambda cmd, **kw: launched.append((cmd, kw)))

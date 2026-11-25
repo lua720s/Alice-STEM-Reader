@@ -8,10 +8,10 @@ import time
 import pymupdf
 import pytest
 
-from pdf_latex_overlay import prepare
-from pdf_latex_overlay.models import FormulaSet
-from pdf_latex_overlay.recognize import FixedBackend
-from pdf_latex_overlay.viewer.session import SessionError, ViewerSession
+from alice_stem_reader import prepare
+from alice_stem_reader.models import FormulaSet
+from alice_stem_reader.recognize import FixedBackend
+from alice_stem_reader.viewer.session import SessionError, ViewerSession
 
 
 class FakeDetector:

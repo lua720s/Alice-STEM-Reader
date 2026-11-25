@@ -12,10 +12,10 @@ import urllib.request
 
 import pytest
 
-from pdf_latex_overlay import applaunch
-from pdf_latex_overlay.viewer.hub import Hub
-from pdf_latex_overlay.viewer.server import make_server, serve
-from pdf_latex_overlay.viewer.session import SessionError
+from alice_stem_reader import applaunch
+from alice_stem_reader.viewer.hub import Hub
+from alice_stem_reader.viewer.server import make_server, serve
+from alice_stem_reader.viewer.session import SessionError
 
 
 def _pdf(fx, d, name):
@@ -79,7 +79,7 @@ def test_http_ping_addfiles_quit(fx, tmp_path):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX のファイル権限")
 def test_serve_writes_private_state_file_and_exits_when_idle(fx, tmp_path, monkeypatch):
-    monkeypatch.setenv("PLO_LIBRARY", str(tmp_path / "lib"))
+    monkeypatch.setenv("ASR_LIBRARY", str(tmp_path / "lib"))
     a = _pdf(fx, tmp_path / "in", "a.pdf")
     state = tmp_path / "s" / "server.json"
     out = {}
@@ -99,9 +99,9 @@ def test_serve_writes_private_state_file_and_exits_when_idle(fx, tmp_path, monke
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX のファイル権限")
 def test_app_open_reuses_the_running_viewer_and_stops(fx, tmp_path, monkeypatch):
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
-    monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "app.log"))
-    monkeypatch.setenv("PLO_LIBRARY", str(tmp_path / "lib"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_LOG", str(tmp_path / "app.log"))
+    monkeypatch.setenv("ASR_LIBRARY", str(tmp_path / "lib"))
     a = _pdf(fx, tmp_path / "in", "a.pdf")
     b = _pdf(fx, tmp_path / "other", "b.pdf")
     opened = []
@@ -125,7 +125,7 @@ def test_app_open_reuses_the_running_viewer_and_stops(fx, tmp_path, monkeypatch)
 
 
 def test_app_open_rejects_bad_input(tmp_path, monkeypatch):
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
     with pytest.raises(ValueError):
         applaunch.app_open(files=[str(tmp_path / "none.pdf")], backend="none", opener=lambda u: None)
     with pytest.raises(ValueError):
@@ -134,7 +134,7 @@ def test_app_open_rejects_bad_input(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("osacompile"), reason="macOS のみ")
 def test_build_app_has_open_with_pdf_and_is_signed(tmp_path):
-    from pdf_latex_overlay.appbuild import BUNDLE_ID, build_app
+    from alice_stem_reader.appbuild import BUNDLE_ID, build_app
 
     app = build_app(tmp_path, python="/path with space/python", register=False)
     assert app.name == "Alice STEM Reader.app"
@@ -150,7 +150,7 @@ def test_build_app_has_open_with_pdf_and_is_signed(tmp_path):
 
 def test_launch_script_has_no_chooser_dialog():
     """起動時の「開くものを選んでください」の画面をなくした。選ぶのは、ビューアの画面の「開く」。"""
-    from pdf_latex_overlay.appbuild import applescript
+    from alice_stem_reader.appbuild import applescript
 
     src = applescript("/x/python", "/x/log")
     run = src.split("on run", 1)[1].split("end run", 1)[0]
@@ -162,9 +162,9 @@ def test_launch_script_has_no_chooser_dialog():
 
 
 def test_app_open_without_arguments_starts_the_viewer_and_opens_the_browser(fx, tmp_path, monkeypatch):
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
-    monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "app.log"))
-    monkeypatch.setenv("PLO_LIBRARY", str(tmp_path / "lib"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_LOG", str(tmp_path / "app.log"))
+    monkeypatch.setenv("ASR_LIBRARY", str(tmp_path / "lib"))
     opened = []
     try:
         r = applaunch.app_open(backend="none", opener=opened.append)  # 開くものを何も指定しない
@@ -191,8 +191,8 @@ def test_opening_does_not_auto_recognize_by_default():
     """PDFを開いただけでは、全ページを自動で認識しない（2026-11-19 のユーザー指示）。--auto で以前の動き。"""
     import inspect
 
-    from pdf_latex_overlay import cli
-    from pdf_latex_overlay.viewer.server import serve
+    from alice_stem_reader import cli
+    from alice_stem_reader.viewer.server import serve
 
     p = cli.build_parser()
     assert p.parse_args(["viewer", "x.pdf"]).auto is False
@@ -206,8 +206,8 @@ def test_opening_does_not_auto_recognize_by_default():
 def test_launch_hook_runs_only_safe_user_files(tmp_path, monkeypatch):
     import os
 
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
-    monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "app.log"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_LOG", str(tmp_path / "app.log"))
     assert applaunch.run_hook() is False  # なければ何もしない
     h = applaunch.hooks_dir() / "on-launch"
     h.parent.mkdir(parents=True)
@@ -225,7 +225,7 @@ def test_launch_hook_runs_only_safe_user_files(tmp_path, monkeypatch):
 
 
 def test_snip_applescript_calls_app_snip():
-    from pdf_latex_overlay.appbuild import snip_applescript
+    from alice_stem_reader.appbuild import snip_applescript
 
     src = snip_applescript("/x y/python")
     assert "app-snip" in src and "on run" in src and "/x y/python" in src

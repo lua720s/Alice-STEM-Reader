@@ -16,13 +16,13 @@ import sys
 
 import pytest
 
-from pdf_latex_overlay import prepare, safety
-from pdf_latex_overlay.models import FormulaSet
-from pdf_latex_overlay.recognize import FixedBackend
-from pdf_latex_overlay.viewer.fsops import clean_name, move_to_trash
-from pdf_latex_overlay.viewer.hub import Hub, file_id
-from pdf_latex_overlay.viewer.server import make_server
-from pdf_latex_overlay.viewer.session import SessionError, ViewerSession
+from alice_stem_reader import prepare, safety
+from alice_stem_reader.models import FormulaSet
+from alice_stem_reader.recognize import FixedBackend
+from alice_stem_reader.viewer.fsops import clean_name, move_to_trash
+from alice_stem_reader.viewer.hub import Hub, file_id
+from alice_stem_reader.viewer.server import make_server
+from alice_stem_reader.viewer.session import SessionError, ViewerSession
 
 
 def _make_pdf(path, fx, title, pages=1):
@@ -486,7 +486,7 @@ def test_http_this_page_endpoint(fx, tmp_path):
 
 def test_unexpected_errors_return_500_json_not_a_dropped_connection(fx, tmp_path, monkeypatch):
     """Failed to fetch の原因: 想定外の例外でサーバーが接続を切っていた。JSON の 500 で返す。"""
-    from pdf_latex_overlay.models import Formula
+    from alice_stem_reader.models import Formula
 
     src = tmp_path / "s.pdf"
     shutil.copy(fx["scan"], src)
@@ -513,7 +513,7 @@ def test_static_ui_has_menus_dialogs_and_renamed_button():
     """画面の部品（⋯メニュー、新しいフォルダ、複数選択、OCRの進み具合、接続切れ）と、ボタン名の変更。"""
     from pathlib import Path
 
-    static = Path(__file__).resolve().parents[1] / "src" / "pdf_latex_overlay" / "viewer" / "static"
+    static = Path(__file__).resolve().parents[1] / "src" / "alice_stem_reader" / "viewer" / "static"
     html = (static / "index.html").read_text(encoding="utf-8")
     js = (static / "app.js").read_text(encoding="utf-8")
     assert "このページを認識" in html and "全ページを認識" not in html and "全ページを認識" not in js

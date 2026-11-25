@@ -11,12 +11,12 @@ import urllib.request
 import pymupdf
 import pytest
 
-from pdf_latex_overlay import prepare
-from pdf_latex_overlay.models import FormulaSet
-from pdf_latex_overlay.recognize import FixedBackend
-from pdf_latex_overlay.viewer.hub import Hub, natural_key
-from pdf_latex_overlay.viewer.server import make_server
-from pdf_latex_overlay.viewer.session import SessionError
+from alice_stem_reader import prepare
+from alice_stem_reader.models import FormulaSet
+from alice_stem_reader.recognize import FixedBackend
+from alice_stem_reader.viewer.hub import Hub, natural_key
+from alice_stem_reader.viewer.server import make_server
+from alice_stem_reader.viewer.session import SessionError
 
 
 @pytest.fixture

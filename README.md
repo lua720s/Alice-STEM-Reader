@@ -1,4 +1,4 @@
-<p align="center"><img src="src/pdf_latex_overlay/assets/icon-1024.png" width="112" alt=""></p>
+<p align="center"><img src="src/alice_stem_reader/assets/icon-1024.png" width="112" alt=""></p>
 
 # Alice STEM Reader
 
@@ -40,8 +40,8 @@ Install once (Python 3.11 or later), then open the app from your launcher. The i
 ```bash
 git clone https://github.com/lua720s/Alice-STEM-Reader.git && cd Alice-STEM-Reader
 python3.12 -m venv .venv && .venv/bin/pip install -e .
-.venv/bin/python -m pdf_latex_overlay setup-models         # recognition models (~6 GB, SHA-256 verified)
-.venv/bin/python -m pdf_latex_overlay build-app            # two apps in ~/Applications
+.venv/bin/python -m alice_stem_reader setup-models         # recognition models (~6 GB, SHA-256 verified)
+.venv/bin/python -m alice_stem_reader build-app            # two apps in ~/Applications
 ```
 
 - **Alice STEM Reader** opens the reader (Launchpad, Spotlight, Raycast…). Add documents or folders with "+" at the top left, or right-click a file in Finder → "Open With" → Alice STEM Reader, or drop it on the icon. Your default apps are not changed.
@@ -53,8 +53,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -e .
 ```powershell
 git clone https://github.com/lua720s/Alice-STEM-Reader.git; cd Alice-STEM-Reader
 py -3.12 -m venv .venv; .venv\Scripts\pip install -e .
-.venv\Scripts\python -m pdf_latex_overlay setup-models
-.venv\Scripts\python -m pdf_latex_overlay build-app --start-at-login
+.venv\Scripts\python -m alice_stem_reader setup-models
+.venv\Scripts\python -m alice_stem_reader build-app --start-at-login
 ```
 
 - **Start menu:** "Alice STEM Reader" and "Alice STEM Snip" (search for them, or pin them). Documents can also be opened with right-click → **Send to → Alice STEM Reader**, or by dropping them on the shortcut.
@@ -67,8 +67,8 @@ py -3.12 -m venv .venv; .venv\Scripts\pip install -e .
 ```bash
 git clone https://github.com/lua720s/Alice-STEM-Reader.git && cd Alice-STEM-Reader
 python3 -m venv .venv && .venv/bin/pip install -e ".[hotkeys]"
-.venv/bin/python -m pdf_latex_overlay setup-models
-.venv/bin/python -m pdf_latex_overlay build-app --start-at-login
+.venv/bin/python -m alice_stem_reader setup-models
+.venv/bin/python -m alice_stem_reader build-app --start-at-login
 ```
 
 - **Application menu / launcher:** "Alice STEM Reader" (also offered under "Open With" for supported files, with quick actions for Snip and the dashboard) and "Alice STEM Snip".
@@ -163,7 +163,7 @@ alice-stem-reader formats                                     # supported format
 alice-stem-reader embed in.pdf out.pdf --formulas f.json      # derived PDF with copyable formulas (verified)
 ```
 
-`.venv/bin/python -m pdf_latex_overlay …` (Windows: `.venv\Scripts\python -m pdf_latex_overlay …`) works the same way. More: `viewer --open-in app|browser`, `setup-models [--tiny]`, `hotkey-agent` (Windows/Linux), `build-app [--start-at-login]`.
+`.venv/bin/python -m alice_stem_reader …` (Windows: `.venv\Scripts\python -m alice_stem_reader …`) works the same way. More: `viewer --open-in app|browser`, `setup-models [--tiny]`, `hotkey-agent` (Windows/Linux), `build-app [--start-at-login]`.
 
 ## Notes on formats
 
@@ -197,7 +197,7 @@ Converted PDFs are cached by the content hash of the original file and are not r
 | `library/_snips/` | Snip images and records (source, engine, time) |
 | Settings folder — macOS `~/Library/Application Support/Alice STEM Reader/`, Windows `%APPDATA%\Alice STEM Reader\`, Linux `~/.config/alice-stem-reader/` | App settings (`app.json`: added folders, shortcuts, output format, export options, window mode) |
 
-Set `PLO_LIBRARY` to move `library/`.
+Set `ASR_LIBRARY` to move `library/`.
 
 - The viewer listens on `127.0.0.1` only and requires a per-launch token (it cannot be used from other computers).
 - The browser interface makes no external requests (Content-Security-Policy restricted to itself; KaTeX for math rendering is bundled).
@@ -215,7 +215,7 @@ Main dependencies: [PyMuPDF](https://pymupdf.readthedocs.io/) (AGPL-3.0), [pikep
 .venv/bin/python -m pytest -q -m model        # tests with real models (after installing them)
 ```
 
-- [Requirements](docs/REQUIREMENTS.md) · [Design](docs/DESIGN.md) · [Model evaluation](docs/MODELS.md) · [Mathpix validation](docs/MATHPIX_VALIDATION.md) · [Roadmap](docs/ROADMAP.md)
+- [Requirements](docs/REQUIREMENTS.md) · [Design](docs/DESIGN.md) · [Model evaluation](docs/MODELS.md) · [Roadmap](docs/ROADMAP.md)
 - To start other programs whenever the app opens, place an executable `hooks/on-launch` in the settings folder (Windows: `on-launch.cmd`, `.bat`, `.ps1` or `.exe`); it runs in the background on each launch.
 - CI runs the test suite on Ubuntu, Windows and macOS (`.github/workflows/tests.yml`).
 - Example of creating derived PDFs from another application: [examples/embed_adapter.py](examples/embed_adapter.py)

@@ -2,7 +2,7 @@
 
 ## Independent module and interface
 
-The Python package `pdf_latex_overlay` and its CLI are the product. The public entry point is `process_pdf(input_path, output_path, options) -> RunReport`. The CLI calls it, and other applications embed it through an adapter that calls the same entry point (`examples/embed_adapter.py`). The project has no dependency on any particular host application.
+The Python package `alice_stem_reader` and its CLI are the product. The public entry point is `process_pdf(input_path, output_path, options) -> RunReport`. The CLI calls it, and other applications embed it through an adapter that calls the same entry point (`examples/embed_adapter.py`). The project has no dependency on any particular host application.
 
 - `backends/mathpix` manages upload through retrieval. It is separate from the local path, and sending anything externally is an explicit choice.
 - `detect` finds formula regions on rendered pages. It starts from the PDF-Extract-Kit MFD example recommended by UniMERNet, and later stages can also be exercised with manual rectangles and fixed detection results. [UniMERNet](https://github.com/opendatalab/UniMERNet)
@@ -60,7 +60,7 @@ macOS 27.0.1, PyMuPDF 2.1 (MuPDF 1.28.6), pikepdf 10.18.2. Both vector and raste
 **Where data lives (2026-11-19)**
 
 1. **The collection is the real folder (nothing is copied).** Folders given to `viewer` are read and listed as they are; documents stay where they are, like an Obsidian vault. Rename, move, delete and new-folder act on the real folders (delete moves to the Trash).
-2. **App data is kept elsewhere.** Recognition results (boxes, LaTeX, history, exported PDFs) are stored under `library/<16-digit content hash>/` (`PLO_LIBRARY` to change it; not tracked by Git). Moving a document keeps its results as long as the content is the same. **Nothing is created inside the user's document folders.**
+2. **App data is kept elsewhere.** Recognition results (boxes, LaTeX, history, exported PDFs) are stored under `library/<16-digit content hash>/` (`ASR_LIBRARY` to change it; not tracked by Git). Moving a document keeps its results as long as the content is the same. **Nothing is created inside the user's document folders.**
 3. **Non-PDF documents** (EPUB, DjVu, images, Markdown, LaTeX, …) are converted to PDFs in `library/_converted/`, keyed by the source file's content hash, with a conversion record (tool, version, time) in a `.json` of the same name. Snip history lives in `library/_snips/`.
 
 **"Failed to fetch" (2026-11-19, investigation):** the browser could not reach the viewer. Three causes were confirmed: (1) the viewer exited, (2) it was restarted and the port/token changed, (3) an unexpected server exception dropped the connection. (3) was reproduced by cropping a box outside the page and fixed (it now returns 400, and unexpected exceptions return a JSON 500). For (1) and (2), a banner with a "Reconnect" button is shown and disappears once the connection is back.
@@ -121,7 +121,7 @@ Opening a document does not detect and recognize every page (`serve(auto=False)`
 ## Keyboard shortcuts and the Snip dashboard (v0.2, 2026-11-25)
 
 - `viewer/static/keys.js` defines every action with a default binding. Defaults follow Mathpix Snip: ⌃⌘M snip the screen, ⌃⌘O open the app, ⌃⌘L / ⌃⌘N new LaTeX / Markdown Snip (Ctrl+Alt on other platforms); in the dashboard ←/→ previous/next Snip, ⇧←/⇧→ oldest/newest, ↑/↓ choose a format row, ⇧↑/⇧↓ switch tabs, Enter edit, ⇧Enter or ⌃Enter save, Delete delete. Bindings are changed in Settings (key capture, conflict check, per-action and global reset) and stored in `localStorage`; global ones are also written to `app.json` (`global_hotkeys`, only the values that differ from the defaults) via `POST /api/settings`.
-- `agent/snip_agent.swift` is the **Alice STEM Snip** menu bar app (LSUIElement). It registers the global shortcuts with Carbon `RegisterEventHotKey` (no Accessibility permission needed), reloads them when `app.json` changes, and runs `python -m pdf_latex_overlay app-snip` / `app-open --view … / --new …`. Launching it from Launchpad, or opening it again while it runs, takes a Snip immediately; `--background` starts it silently (used by the Reader app and the optional login item). If `swiftc` is unavailable, `build-app` falls back to an applet that snips on launch, without global shortcuts.
+- `agent/snip_agent.swift` is the **Alice STEM Snip** menu bar app (LSUIElement). It registers the global shortcuts with Carbon `RegisterEventHotKey` (no Accessibility permission needed), reloads them when `app.json` changes, and runs `python -m alice_stem_reader app-snip` / `app-open --view … / --new …`. Launching it from Launchpad, or opening it again while it runs, takes a Snip immediately; `--background` starts it silently (used by the Reader app and the optional login item). If `swiftc` is unavailable, `build-app` falls back to an applet that snips on launch, without global shortcuts.
 - The dashboard (`viewer/static/dashboard.js`) is a full view with summary tiles, search and filters by kind and source, a list grouped by day with multi-select for export, and a detail pane with OCR (rendered preview plus copyable format rows), Data (provenance and JSON) and Original (image) tabs.
 
 ## Windows and Linux, app window, output and export settings (v0.3, 2026-11-25)

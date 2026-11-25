@@ -8,13 +8,13 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from pdf_latex_overlay.delims import STYLES, convert_delims, wrap_single
-from pdf_latex_overlay.viewer import hub as hubmod
-from pdf_latex_overlay.viewer.hub import Hub
-from pdf_latex_overlay.viewer.server import serve
-from pdf_latex_overlay.viewer.session import SessionError, ViewerSession
+from alice_stem_reader.delims import STYLES, convert_delims, wrap_single
+from alice_stem_reader.viewer import hub as hubmod
+from alice_stem_reader.viewer.hub import Hub
+from alice_stem_reader.viewer.server import serve
+from alice_stem_reader.viewer.session import SessionError, ViewerSession
 
-STATIC = Path(__file__).resolve().parents[1] / "src" / "pdf_latex_overlay" / "viewer" / "static"
+STATIC = Path(__file__).resolve().parents[1] / "src" / "alice_stem_reader" / "viewer" / "static"
 
 
 def _pdf(fx, d, name, title=None):
@@ -47,7 +47,7 @@ def test_wrap_single_inline_and_display():
 
 
 def test_export_applies_the_delimiter_setting_to_embedded_text(fx, tmp_path):
-    from pdf_latex_overlay.models import Formula
+    from alice_stem_reader.models import Formula
 
     p = _pdf(fx, tmp_path / "in", "a.pdf")
     s = ViewerSession(p, tmp_path / "work")
@@ -66,7 +66,7 @@ def test_export_applies_the_delimiter_setting_to_embedded_text(fx, tmp_path):
 
 
 def test_hub_add_root_is_remembered_and_serve_reads_it(fx, tmp_path, monkeypatch):
-    monkeypatch.setenv("PLO_LIBRARY", str(tmp_path / "lib"))
+    monkeypatch.setenv("ASR_LIBRARY", str(tmp_path / "lib"))
     a = _pdf(fx, tmp_path / "教材", "a.pdf")
     rf = tmp_path / "support" / "roots.json"
     h = Hub([], library=tmp_path / "lib", roots_file=rf)  # 何も指定しなくても起動できる
@@ -110,7 +110,7 @@ def test_pick_uses_osascript_and_handles_cancel(fx, tmp_path, monkeypatch):
     with pytest.raises(SessionError):
         h.pick("other")
     # Windows・Linux: OS の選択画面（osutil.pick_paths）を使う
-    from pdf_latex_overlay import osutil
+    from alice_stem_reader import osutil
 
     monkeypatch.setattr(hubmod.sys, "platform", "linux")
     asked = []

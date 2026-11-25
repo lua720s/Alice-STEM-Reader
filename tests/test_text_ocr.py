@@ -9,11 +9,11 @@ import urllib.request
 import pymupdf
 import pytest
 
-from pdf_latex_overlay import pipeline
-from pdf_latex_overlay.models import Formula, FormulaSet
-from pdf_latex_overlay.prepare import process_text
-from pdf_latex_overlay.recognize.textocr import looks_like_text, ocr_page_text
-from pdf_latex_overlay.viewer.session import SessionError, ViewerSession
+from alice_stem_reader import pipeline
+from alice_stem_reader.models import Formula, FormulaSet
+from alice_stem_reader.prepare import process_text
+from alice_stem_reader.recognize.textocr import looks_like_text, ocr_page_text
+from alice_stem_reader.viewer.session import SessionError, ViewerSession
 
 
 class FakeOCR:
@@ -87,7 +87,7 @@ def _texts(fx):
 
 def test_japanese_text_is_embedded_invisibly_and_fully_verified(fx, tmp_path):
     """日本語の文章を不可視テキストとして埋め込み、外観・本文・MuPDF・PDFKit の検証がすべて通る（同じ文が2回出ても可）。"""
-    from pdf_latex_overlay import copycheck
+    from alice_stem_reader import copycheck
 
     fs = FormulaSet(formulas=_texts(fx) + [Formula(id="f1", page=0, rect=(20, 330, 150, 356), latex="x^{2}+1", status="confirmed")])
     out = tmp_path / "ja.pdf"

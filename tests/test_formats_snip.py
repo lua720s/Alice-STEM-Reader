@@ -11,11 +11,11 @@ import pymupdf
 import pytest
 from PIL import Image, ImageDraw
 
-from pdf_latex_overlay import docformats, snip
-from pdf_latex_overlay.recognize import FixedBackend
-from pdf_latex_overlay.viewer.hub import Hub
-from pdf_latex_overlay.viewer.server import make_server
-from pdf_latex_overlay.viewer.session import SessionError
+from alice_stem_reader import docformats, snip
+from alice_stem_reader.recognize import FixedBackend
+from alice_stem_reader.viewer.hub import Hub
+from alice_stem_reader.viewer.server import make_server
+from alice_stem_reader.viewer.session import SessionError
 
 
 def _png(w=600, h=200, text="x^2+1", rotate_exif=False) -> bytes:
@@ -158,7 +158,7 @@ def test_format_for_copy_follows_delimiter_settings():
 def test_snip_store_history_and_exports(tmp_path):
     import zipfile
 
-    from pdf_latex_overlay import outfmt
+    from alice_stem_reader import outfmt
 
     st = snip.SnipStore(tmp_path / "_snips")
     a = st.add(b"png1", {"kind": "math", "latex": "a^2"}, {"type": "screen"}, {"name": "fixed"})
@@ -286,8 +286,8 @@ def test_rename_keeps_original_extension(tmp_path):
 def test_export_text_reading_order_and_notes(tmp_path, fx):
     import shutil
 
-    from pdf_latex_overlay.models import Formula
-    from pdf_latex_overlay.viewer.session import ViewerSession
+    from alice_stem_reader.models import Formula
+    from alice_stem_reader.viewer.session import ViewerSession
 
     src = tmp_path / "演習.pdf"
     shutil.copy(fx["scan"], src)
@@ -328,9 +328,9 @@ def test_bundled_katex_is_served_and_paths_are_locked(tmp_path):
 def test_blank_editor_entries_and_ui_queue_and_settings(tmp_path, monkeypatch):
     import threading
 
-    from pdf_latex_overlay import applaunch
+    from alice_stem_reader import applaunch
 
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
     h = Hub([tmp_path], library=tmp_path / "lib")
     httpd, token = make_server(h)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -376,11 +376,11 @@ def test_blank_editor_entries_and_ui_queue_and_settings(tmp_path, monkeypatch):
 
 
 def test_app_open_queues_view_when_tab_is_active(fx, tmp_path, monkeypatch):
-    from pdf_latex_overlay import applaunch
+    from alice_stem_reader import applaunch
 
-    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
-    monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "app.log"))
-    monkeypatch.setenv("PLO_LIBRARY", str(tmp_path / "lib"))
+    monkeypatch.setenv("ASR_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("ASR_APP_LOG", str(tmp_path / "app.log"))
+    monkeypatch.setenv("ASR_LIBRARY", str(tmp_path / "lib"))
     opened = []
     try:
         applaunch.app_open(backend="none", opener=opened.append)
@@ -400,7 +400,7 @@ def test_global_hotkey_defaults_agree_everywhere():
     import re
     from pathlib import Path
 
-    from pdf_latex_overlay import applaunch
+    from alice_stem_reader import applaunch
 
     root = Path(applaunch.__file__).resolve().parent
     swift = (root / "agent" / "snip_agent.swift").read_text(encoding="utf-8")

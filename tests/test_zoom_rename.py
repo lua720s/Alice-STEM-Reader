@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-STATIC = Path(__file__).resolve().parents[1] / "src" / "pdf_latex_overlay" / "viewer" / "static"
+STATIC = Path(__file__).resolve().parents[1] / "src" / "alice_stem_reader" / "viewer" / "static"
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 JS = (STATIC / "app.js").read_text(encoding="utf-8")
 CSS = (STATIC / "style.css").read_text(encoding="utf-8")

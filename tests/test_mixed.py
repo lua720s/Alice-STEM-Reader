@@ -5,10 +5,10 @@ import shutil
 import pymupdf
 import pytest
 
-from pdf_latex_overlay.detect.mfd import DETECT_DPI, detect_page
-from pdf_latex_overlay.recognize.base import FixedBackend
-from pdf_latex_overlay.recognize.mixed import group_rows, join_row, recognize_mixed
-from pdf_latex_overlay.viewer.session import ViewerSession
+from alice_stem_reader.detect.mfd import DETECT_DPI, detect_page
+from alice_stem_reader.recognize.base import FixedBackend
+from alice_stem_reader.recognize.mixed import group_rows, join_row, recognize_mixed
+from alice_stem_reader.viewer.session import ViewerSession
 
 DPI = 200
 K = DPI / 72.0
@@ -137,7 +137,7 @@ def test_drawn_formula_box_keeps_the_old_formula_path(fx, tmp_path):
 
 
 def test_math_runs_and_punctuation_are_kept():
-    from pdf_latex_overlay.recognize.mixed import math_runs
+    from alice_stem_reader.recognize.mixed import math_runs
 
     def w(t, x0, x1):
         return {"text": t, "view": (x0, 0, x1, 10), "score": 0.9}
@@ -157,7 +157,7 @@ def test_join_spacing_and_display_becomes_inline_with_text():
 
 
 def test_leading_label_is_text_and_wide_gaps_stay_one_formula():
-    from pdf_latex_overlay.recognize.mixed import math_runs
+    from alice_stem_reader.recognize.mixed import math_runs
 
     def w(t, x0, x1):
         return {"text": t, "view": (x0, 0, x1, 20), "score": 0.9}
@@ -191,7 +191,7 @@ def test_formula_box_sticking_out_of_the_region_is_clipped_to_it(fx, tmp_path):
 
 def test_middle_dot_and_dash_are_not_japanese_text(fx, tmp_path):
     """数式の「……」を「・」と読み違えても、その数式の枠を文章として捨てない。"""
-    from pdf_latex_overlay.recognize.textocr import looks_like_text
+    from alice_stem_reader.recognize.textocr import looks_like_text
 
     assert not looks_like_text("・・・・・") and not looks_like_text("ー") and looks_like_text("のとき")
     doc = pymupdf.open(_page(fx, tmp_path))

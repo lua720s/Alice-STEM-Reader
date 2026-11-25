@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from pdf_latex_overlay import outfmt
+from alice_stem_reader import outfmt
 
-STATIC = Path(__file__).resolve().parents[1] / "src" / "pdf_latex_overlay" / "viewer" / "static"
+STATIC = Path(__file__).resolve().parents[1] / "src" / "alice_stem_reader" / "viewer" / "static"
 
 CASES_MATH = ["x^{2}+1", "a=b\nc=d", "\n\\int_0^1 x\\,dx\n", ""]
 CASES_TEXT = ["次の式 \\(x^2\\) を見よ。\n次の行 \\[a=b\\]", "段落1の\n続き\n\n段落2 \\(y\\)", "数式なし"]

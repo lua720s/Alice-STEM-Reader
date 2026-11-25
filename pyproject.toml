@@ -37,14 +37,13 @@ hotkeys = ["pynput>=1.7; sys_platform == 'linux'"]  # Linux（X11）の全体の
 ml = ["torch>=2.2", "transformers>=4.40", "pillow>=10"]
 
 [project.scripts]
-alice-stem-reader = "pdf_latex_overlay.cli:main"
-pdf-latex-overlay = "pdf_latex_overlay.cli:main"
+alice-stem-reader = "alice_stem_reader.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-pdf_latex_overlay = ["viewer/static/*", "viewer/static/vendor/katex/*", "viewer/static/vendor/katex/fonts/*", "assets/*", "agent/*.swift"]
+alice_stem_reader = ["viewer/static/*", "viewer/static/vendor/katex/*", "viewer/static/vendor/katex/fonts/*", "assets/*", "agent/*.swift"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

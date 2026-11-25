@@ -11,13 +11,13 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from pdf_latex_overlay.models import Formula
-from pdf_latex_overlay.viewer.hub import Hub
-from pdf_latex_overlay.viewer.server import make_server
-from pdf_latex_overlay.viewer.session import SessionError, ViewerSession
-from pdf_latex_overlay.viewer.vfs import VFS, VFSError
+from alice_stem_reader.models import Formula
+from alice_stem_reader.viewer.hub import Hub
+from alice_stem_reader.viewer.server import make_server
+from alice_stem_reader.viewer.session import SessionError, ViewerSession
+from alice_stem_reader.viewer.vfs import VFS, VFSError
 
-STATIC = Path(__file__).resolve().parents[1] / "src" / "pdf_latex_overlay" / "viewer" / "static"
+STATIC = Path(__file__).resolve().parents[1] / "src" / "alice_stem_reader" / "viewer" / "static"
 
 
 def _pdf(fx, d, name, title=None):

@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from pdf_latex_overlay import cli
-from pdf_latex_overlay.recognize import ENGINES, RecognizerUnavailable, get_backend
-from pdf_latex_overlay.recognize.mathpix import MathpixBackend, strip_delimiters
-from pdf_latex_overlay.recognize.ppformulanet import PPFormulaNetBackend, tidy_pp
-from pdf_latex_overlay.viewer.hub import Hub
-from pdf_latex_overlay.viewer.server import make_server
-from pdf_latex_overlay.viewer.session import SessionError
+from alice_stem_reader import cli
+from alice_stem_reader.recognize import ENGINES, RecognizerUnavailable, get_backend
+from alice_stem_reader.recognize.mathpix import MathpixBackend, strip_delimiters
+from alice_stem_reader.recognize.ppformulanet import PPFormulaNetBackend, tidy_pp
+from alice_stem_reader.viewer.hub import Hub
+from alice_stem_reader.viewer.server import make_server
+from alice_stem_reader.viewer.session import SessionError
 
 
 
@@ -134,7 +134,7 @@ def test_hub_set_engine_refused_while_ocr_running(hub, monkeypatch):
 
 
 def test_hub_set_engine_missing_model_is_409(hub, monkeypatch):
-    monkeypatch.setenv("PLO_PP_PYTHON", "/nonexistent/python")
+    monkeypatch.setenv("ASR_PP_PYTHON", "/nonexistent/python")
     with pytest.raises(SessionError) as e:
         hub.set_engine("ppformulanet")
     assert e.value.status == 409 and hub.backend_name == "none"

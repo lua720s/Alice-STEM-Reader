@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_latex_overlay import fixtures
+from alice_stem_reader import fixtures
 
 
 @pytest.fixture(scope="session")

@@ -10,11 +10,11 @@ import numpy as np
 import pymupdf
 import pytest
 
-from pdf_latex_overlay import safety
-from pdf_latex_overlay.models import FormulaSet
-from pdf_latex_overlay.recognize import FixedBackend, crop_png
-from pdf_latex_overlay.viewer.server import make_server
-from pdf_latex_overlay.viewer.session import SessionError, ViewerSession
+from alice_stem_reader import safety
+from alice_stem_reader.models import FormulaSet
+from alice_stem_reader.recognize import FixedBackend, crop_png
+from alice_stem_reader.viewer.server import make_server
+from alice_stem_reader.viewer.session import SessionError, ViewerSession
 
 
 @pytest.fixture
