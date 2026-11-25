@@ -276,5 +276,5 @@ def test_static_ui_has_review_marker():
     css = (static / "style.css").read_text(encoding="utf-8")
     for ident in ("reviewbtn", "reviewcount", "altbox", "altpreview", "alttext", "usealt"):
         assert f'id="{ident}"' in html, ident
-    assert "要確認" in html and "nextReview" in js and "f.review" in js and 'case "n"' in js
+    assert "要確認" in html and "nextReview" in js and "f.review" in js and "nextReview: () => nextReview(1)" in js
     assert ".box.review" in css and "#altbox" in css and ".meta.has-review" in css

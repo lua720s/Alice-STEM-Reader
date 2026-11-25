@@ -40,7 +40,7 @@ pdf-latex-overlay = "pdf_latex_overlay.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-pdf_latex_overlay = ["viewer/static/*", "viewer/static/vendor/katex/*", "viewer/static/vendor/katex/fonts/*", "assets/*"]
+pdf_latex_overlay = ["viewer/static/*", "viewer/static/vendor/katex/*", "viewer/static/vendor/katex/fonts/*", "assets/*", "agent/*.swift"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

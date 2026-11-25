@@ -306,3 +306,83 @@ def test_bundled_katex_is_served_and_paths_are_locked(tmp_path):
     finally:
         httpd.shutdown()
         h.close()
+
+
+def test_blank_editor_entries_and_ui_queue_and_settings(tmp_path, monkeypatch):
+    import threading
+
+    from pdf_latex_overlay import applaunch
+
+    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
+    h = Hub([tmp_path], library=tmp_path / "lib")
+    httpd, token = make_server(h)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
+
+    def call(method, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method=method,
+                                     headers={"X-Token": token, **({"Content-Type": "application/json"} if data else {})})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+
+    try:
+        rec = call("POST", "/api/snips/new", {"format": "markdown"})
+        assert rec["kind"] == "mixed" and rec["has_image"] is False and rec["source"] == {"type": "editor", "format": "markdown"}
+        with pytest.raises(urllib.error.HTTPError) as ei:
+            urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/api/snips/{rec['id']}.png", headers={"X-Token": token}))
+        assert ei.value.code == 404
+        call("POST", "/api/ui/push", {"view": "snips", "new": "latex"})
+        assert call("GET", "/api/ui/pull")["commands"] == [{"view": "snips", "new": "latex"}]
+        assert call("GET", "/api/ui/pull")["commands"] == []
+        s = call("GET", "/api/settings")
+        assert s["global_hotkeys"]["snip"] == "ctrl+cmd+m" and s["global_hotkeys_custom"] == {}  # Mathpix と同じ既定
+        s = call("POST", "/api/settings", {"global_hotkeys": {"snip": "ctrl+alt+k"}, "delim": "dollar", "single": True})
+        assert s["global_hotkeys"]["snip"] == "ctrl+alt+k" and s["global_hotkeys"]["open"] == "ctrl+cmd+o" and s["delim"] == "dollar"
+        cfg = applaunch.read_config()
+        assert cfg["global_hotkeys"] == {"snip": "ctrl+alt+k"} and cfg["single"] is True
+        for bad in ({"snip": "m"}, {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+m"}, {"evil": "ctrl+x"}):
+            with pytest.raises(urllib.error.HTTPError) as ei:
+                call("POST", "/api/settings", {"global_hotkeys": bad})
+            assert ei.value.code == 400
+    finally:
+        httpd.shutdown()
+        h.close()
+
+
+def test_app_open_queues_view_when_tab_is_active(fx, tmp_path, monkeypatch):
+    from pdf_latex_overlay import applaunch
+
+    monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
+    monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "app.log"))
+    monkeypatch.setenv("PLO_LIBRARY", str(tmp_path / "lib"))
+    opened = []
+    try:
+        applaunch.app_open(backend="none", opener=opened.append)
+        st = applaunch.running_state()
+        applaunch._call(st, "GET", "/api/ping")  # 画面が開いている（直前に通信があった）
+        applaunch.app_open(backend="none", opener=opened.append, new="latex")
+        assert len(opened) == 1  # 新しいタブは開かず、開いている画面に送る
+        assert applaunch._call(st, "GET", "/api/ui/pull")["commands"] == [{"view": "snips", "new": "latex"}]
+        with pytest.raises(ValueError):
+            applaunch.app_open(backend="none", opener=opened.append, view="evil")
+    finally:
+        applaunch.app_stop()
+
+
+def test_global_hotkey_defaults_agree_everywhere():
+    """メニューバーのアプリ（Swift）・サーバー（Python）・画面（keys.js）で、既定の全体ショートカットが同じ（Mathpix と同じ）。"""
+    import re
+    from pathlib import Path
+
+    from pdf_latex_overlay import applaunch
+
+    root = Path(applaunch.__file__).resolve().parent
+    swift = (root / "agent" / "snip_agent.swift").read_text(encoding="utf-8")
+    keys = (root / "viewer" / "static" / "keys.js").read_text(encoding="utf-8")
+    assert applaunch.GLOBAL_HOTKEYS == {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+o", "latex": "ctrl+cmd+l", "markdown": "ctrl+cmd+n"}
+    for k, v in applaunch.GLOBAL_HOTKEYS.items():
+        assert f'"{k}": "{v}"' in swift
+        letter = v.rsplit("+", 1)[1].upper()
+        assert re.search(rf'keys: \[G \+ "{letter}"\][^\n]*hotkey: "{k}"', keys), k
+    assert "RegisterEventHotKey" in swift and "--background" in swift and "LSUIElement" not in swift

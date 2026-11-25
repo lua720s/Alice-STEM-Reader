@@ -235,6 +235,6 @@ def test_static_ui_has_delete_notes_and_virtual_folder_controls():
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     for ident in ("notes", "notetext", "note-doc", "note-page", "sel-vadd"):
         assert f'id="{ident}"' in html, ident
-    for token in ('case "Delete"', "box-x", "deleteFormula", "restoreFormulas", "deletePageFormulas", "actVAdd", "actVMove",
+    for token in ("deleteBox: ", "box-x", "deleteFormula", "restoreFormulas", "deletePageFormulas", "actVAdd", "actVMove",
                   "attachDrag", "/api/vfs/", "/api/notes"):
         assert token in js, token

@@ -104,6 +104,7 @@ class Hub:
         self._hasher: threading.Thread | None = None
         self._hash_busy = 0
         self._snip_store = None
+        self._ui_queue: list[dict] = []  # 画面への指示（アプリ・ショートカットから。表示を切り替える）
         self._snip_lock = threading.Lock()
         self._text_backend_override = None  # 試験用（文章の認識）
 
@@ -949,6 +950,18 @@ class Hub:
         finally:
             doc.close()
         return self.snips().add(png, res, src, self._engine_info(), {"mode": mode, "text_layer": layer or None})
+
+    def ui_push(self, cmd) -> dict:
+        if not isinstance(cmd, dict) or cmd.get("view") not in (None, "reader", "snips", "settings") or cmd.get("new") not in (None, "latex", "markdown"):
+            raise SessionError("指示が不正")
+        with self.lock:
+            self._ui_queue = (self._ui_queue + [{k: cmd[k] for k in ("view", "new") if cmd.get(k)}])[-10:]
+            return {"queued": len(self._ui_queue)}
+
+    def ui_pull(self) -> list[dict]:
+        with self.lock:
+            q, self._ui_queue = self._ui_queue, []
+            return q
 
     def require(self) -> ViewerSession:
         with self.lock:

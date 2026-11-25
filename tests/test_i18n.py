@@ -6,7 +6,8 @@ from pathlib import Path
 STATIC = Path(__file__).resolve().parents[1] / "src" / "pdf_latex_overlay" / "viewer" / "static"
 I18N = (STATIC / "i18n.js").read_text(encoding="utf-8")
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
-JS = (STATIC / "app.js").read_text(encoding="utf-8")
+JS = "\n".join((STATIC / f).read_text(encoding="utf-8") for f in ("app.js", "dashboard.js"))
+KEYS = (STATIC / "keys.js").read_text(encoding="utf-8")
 
 
 def _dict():
@@ -33,6 +34,7 @@ def test_all_ui_keys_are_translated():
     keys = set(re.findall(r'data-i18n(?:-title|-label|-ph|-alt)?="([^"]+)"', HTML))
     keys |= set(re.findall(r'\bT\("((?:[^"\\]|\\.)*)"', JS))
     keys |= set(re.findall(r'"(準備済み|一部のみ処理済み|処理中|未処理|確認中|テーマ: [^"]+)"', JS))
+    keys |= set(re.findall(r'label: "([^"]*[^\x00-\x7f][^"]*)"', KEYS))  # ショートカットの動作の名前
     keys |= {"UniMERNet base（手元で動く・既定）", "UniMERNet tiny（手元で動く・軽い）", "PP-FormulaNet（手元で動く）", "Mathpix（画像を外部に送る）"}
     norm = {k.replace("\\n", "\n") for k in d}
     missing = [k for k in keys if k.replace("\\n", "\n") not in norm]

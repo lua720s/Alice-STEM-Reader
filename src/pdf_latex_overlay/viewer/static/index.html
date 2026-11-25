@@ -12,7 +12,9 @@
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
 <script defer src="vendor/katex/katex.min.js"></script>
 <script defer src="i18n.js"></script>
+<script defer src="keys.js"></script>
 <script defer src="app.js"></script>
+<script defer src="dashboard.js"></script>
 </head>
 <body>
 <header id="topbar">
@@ -32,6 +34,10 @@
   <button id="snip-top" type="button" class="snip-btn" title="画面の一部を Snip して読む（S）" aria-label="画面を Snip" data-i18n-title="画面の一部を Snip して読む（S）" data-i18n-label="画面を Snip">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></svg>
     <span>Snip</span>
+  </button>
+  <button id="dash-open" type="button" class="snip-btn" aria-pressed="false" aria-label="Snip のダッシュボード" data-i18n-label="Snip のダッシュボード">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+    <span data-i18n="ダッシュボード">ダッシュボード</span>
   </button>
   <select id="engine" title="認識エンジン（式の読み取りに使うモデル）" aria-label="認識エンジン" data-i18n-title="認識エンジン（式の読み取りに使うモデル）" data-i18n-label="認識エンジン"></select>
   <button id="autorun" title="いま表示しているページの数式を検出して認識する（PDF全体は、⋯ の「OCRを行う」）" data-i18n-title="いま表示しているページの数式を検出して認識する（PDF全体は、⋯ の「OCRを行う」）" data-i18n="このページを認識">このページを認識</button>
@@ -157,7 +163,7 @@
         <div id="sniplist" role="list" aria-label="Snip の履歴" data-i18n-label="Snip の履歴"></div>
         <div class="row snip-foot">
           <button id="snip-export" type="button" aria-haspopup="menu" data-i18n="書き出す…">書き出す…</button>
-          <button id="snip-more" type="button" hidden data-i18n="さらに表示">さらに表示</button>
+          <button id="snip-more" type="button" data-i18n="ダッシュボードで見る">ダッシュボードで見る</button>
           <span class="muted small" id="snip-count"></span>
         </div>
       </section>
@@ -201,6 +207,76 @@
     </aside>
   </main>
 </div>
+<section id="dash" hidden aria-labelledby="dash-title">
+  <div class="dash-head">
+    <h2 id="dash-title">Snip</h2>
+    <input id="dash-q" type="search" placeholder="Snip を検索（/）" aria-label="Snip を検索" data-i18n-ph="Snip を検索（/）" data-i18n-label="Snip を検索" autocomplete="off" spellcheck="false">
+    <div class="seg small" id="dash-kind" role="group" aria-label="種類" data-i18n-label="種類">
+      <button type="button" data-kind="" aria-pressed="true" data-i18n="すべて">すべて</button>
+      <button type="button" data-kind="math" aria-pressed="false" data-i18n="数式">数式</button>
+      <button type="button" data-kind="mixed" aria-pressed="false" data-i18n="文章＋数式">文章＋数式</button>
+      <button type="button" data-kind="text" aria-pressed="false" data-i18n="文章">文章</button>
+    </div>
+    <select id="dash-src" aria-label="出所" data-i18n-label="出所"></select>
+    <span class="spacer"></span>
+    <button id="dash-snip" type="button" class="primary" data-i18n="画面を Snip">画面を Snip</button>
+    <button id="dash-img" type="button" data-i18n="画像…">画像…</button>
+    <button id="dash-new" type="button" aria-haspopup="menu" data-i18n="新規…">新規…</button>
+    <button id="dash-export" type="button" aria-haspopup="menu" data-i18n="書き出す…">書き出す…</button>
+    <button id="dash-close" type="button" data-i18n="資料に戻る">資料に戻る</button>
+  </div>
+  <div id="dash-kpis" class="dash-kpis" role="list" aria-label="集計" data-i18n-label="集計"></div>
+  <div class="dash-body">
+    <div class="dash-listwrap">
+      <div class="dash-listhead"><span id="dash-count" class="muted small"></span><span class="spacer"></span><button id="dash-selall" type="button" class="small-btn" data-i18n="すべて選択">すべて選択</button></div>
+      <div id="dash-list" class="dash-list" role="listbox" aria-label="Snip の一覧" data-i18n-label="Snip の一覧"></div>
+    </div>
+    <div id="dash-detail" class="dash-detail">
+      <div id="dash-empty" class="muted dash-emptymsg"></div>
+      <div id="dash-main" hidden>
+        <div class="dash-nav">
+          <button id="dash-prev" type="button" class="icon-btn small" aria-label="前の Snip" data-i18n-label="前の Snip">‹</button>
+          <span id="dash-pos" class="muted small"></span>
+          <button id="dash-next" type="button" class="icon-btn small" aria-label="次の Snip" data-i18n-label="次の Snip">›</button>
+          <span id="dash-meta" class="muted small"></span>
+          <span class="spacer"></span>
+          <div class="dash-tabs" role="tablist" aria-label="表示" data-i18n-label="表示">
+            <button type="button" role="tab" id="tab-ocr" data-tab="ocr" aria-selected="true">OCR</button>
+            <button type="button" role="tab" id="tab-data" data-tab="data" aria-selected="false" data-i18n="データ">データ</button>
+            <button type="button" role="tab" id="tab-orig" data-tab="orig" aria-selected="false" data-i18n="元の画像">元の画像</button>
+          </div>
+          <button id="dash-del" type="button" class="danger small-btn" data-i18n="削除">削除</button>
+        </div>
+        <div id="pane-ocr" role="tabpanel" aria-labelledby="tab-ocr">
+          <div id="dash-preview" class="dash-preview"></div>
+          <div id="dash-edit" hidden>
+            <textarea id="dash-editbox" rows="6" spellcheck="false" aria-label="内容を編集" data-i18n-label="内容を編集"></textarea>
+            <div class="row"><button id="dash-save" type="button" class="primary" data-i18n="保存">保存</button><button id="dash-cancel" type="button" data-i18n="キャンセル">キャンセル</button><span class="muted small" data-i18n="Enter で改行、⇧Enter か ⌃Enter で保存、Esc で取り消し">Enter で改行、⇧Enter か ⌃Enter で保存、Esc で取り消し</span></div>
+          </div>
+          <div id="dash-rows" class="dash-rows" role="listbox" aria-label="コピーする形式" data-i18n-label="コピーする形式"></div>
+          <label for="dash-note" class="muted small" data-i18n="メモ（フラッシュカードの表面など）">メモ（フラッシュカードの表面など）</label>
+          <textarea id="dash-note" rows="2" spellcheck="false"></textarea>
+        </div>
+        <div id="pane-data" role="tabpanel" aria-labelledby="tab-data" hidden>
+          <dl id="dash-prov" class="dash-prov"></dl>
+          <div class="row"><button id="dash-copyjson" type="button" data-i18n="JSON をコピー">JSON をコピー</button><button id="dash-copytsv" type="button" data-i18n="TSV の行をコピー">TSV の行をコピー</button></div>
+          <pre id="dash-json" class="dash-json"></pre>
+        </div>
+        <div id="pane-orig" role="tabpanel" aria-labelledby="tab-orig" hidden>
+          <img id="dash-img-big" alt="切り取った画像" data-i18n-alt="切り取った画像">
+          <div class="row"><button id="dash-copyimg" type="button" data-i18n="画像をコピー">画像をコピー</button><button id="dash-openimg" type="button" data-i18n="新しいタブで開く">新しいタブで開く</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<dialog id="sheet" aria-labelledby="sheet-title">
+  <form method="dialog">
+    <h2 id="sheet-title" data-i18n="キーボードショートカット">キーボードショートカット</h2>
+    <div id="sheet-body"></div>
+    <div class="dlg-actions"><button type="button" id="sheet-settings" data-i18n="変更する…">変更する…</button><button type="submit" class="primary" data-i18n="閉じる">閉じる</button></div>
+  </form>
+</dialog>
 <div id="conn" role="alert" hidden>
   <span data-i18n="ビューアに接続できません。ビューアが終了したか、起動し直して接続先が変わった可能性があります。起動し直したときは、表示された新しいURLを開き直してください。">ビューアに接続できません。ビューアが終了したか、起動し直して接続先が変わった可能性があります。起動し直したときは、表示された新しいURLを開き直してください。</span>
   <button id="conn-retry" type="button" data-i18n="再接続">再接続</button>
@@ -229,6 +305,12 @@
       <label class="radio check"><input type="checkbox" id="set-single"> <span data-i18n="数式だけの枠のコピーにも、区切りを付ける">数式だけの枠のコピーにも、区切りを付ける</span></label>
       <div class="muted" data-i18n="例">例</div>
       <pre id="set-sample" aria-live="polite"></pre>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="キーボードショートカット">キーボードショートカット</legend>
+      <p class="muted" data-i18n="既定は Mathpix Snip と同じです。ボタンを押してから、新しいキーを押すと変わります。">既定は Mathpix Snip と同じです。ボタンを押してから、新しいキーを押すと変わります。</p>
+      <div id="keymap"></div>
+      <p><button type="button" id="keys-reset" data-i18n="すべて既定に戻す">すべて既定に戻す</button></p>
     </fieldset>
     <div class="dlg-actions"><button type="submit" class="primary" data-i18n="閉じる">閉じる</button></div>
   </form>

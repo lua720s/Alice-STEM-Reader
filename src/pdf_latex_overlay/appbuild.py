@@ -135,7 +135,7 @@ def _common_info(name: str, bundle_id: str) -> dict:
 
     return {"CFBundleIdentifier": bundle_id, "CFBundleName": name, "CFBundleDisplayName": name,
             "CFBundleShortVersionString": __version__, "LSApplicationCategoryType": "public.app-category.education",
-            "NSHumanReadableCopyright": "Alice STEM Reader — runs locally; documents never leave this Mac."}
+            "NSHumanReadableCopyright": "Alice STEM Reader - runs locally; documents never leave this Mac."}
 
 
 def build_app(dest_dir, python: str | None = None, register: bool = True) -> Path:
@@ -155,18 +155,77 @@ def build_app(dest_dir, python: str | None = None, register: bool = True) -> Pat
             t["CFBundleTypeExtensions"] = exts
         doc_types.append(t)
     _finish(app, {**_common_info(APP_NAME, BUNDLE_ID), "CFBundleDocumentTypes": doc_types,
-                  "NSScreenCaptureUsageDescription": "「画面を Snip」で、選んだ範囲を読み取るために使います（画像は外部に送りません）。"}, register)
+                  "NSScreenCaptureUsageDescription": "Reads the area of the screen you select. Images never leave this Mac."}, register)
     return app
 
 
+AGENT_SRC = Path(__file__).resolve().parent / "agent" / "snip_agent.swift"
+AGENT_EXE = "AliceSTEMSnip"
+
+
+def compile_agent(dest_exe: Path) -> str | None:
+    """メニューバーのアプリ（Swift）をコンパイルする。失敗したら理由を返す。"""
+    swiftc = shutil.which("swiftc")
+    if not swiftc:
+        return "swiftc が見つからない（Xcode か Command Line Tools: xcode-select --install）"
+    dest_exe.parent.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run([swiftc, "-O", "-o", str(dest_exe), str(AGENT_SRC), "-framework", "Cocoa", "-framework", "Carbon"],
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode != 0 or not dest_exe.is_file():
+        return (r.stderr or r.stdout or "swiftc failed").strip()[-1500:]
+    return None
+
+
 def build_snip_app(dest_dir, python: str | None = None, register: bool = True) -> Path:
+    """Alice STEM Snip.app: メニューバーに常駐し、全体のショートカット（既定 ⌃⌘M など）で Snip する。
+
+    swiftc がなければ（またはコンパイルに失敗したら）、起動するたびに Snip するだけのアプレットにする（ショートカットは使えない）。
+    """
     if sys.platform != "darwin" or not shutil.which("osacompile"):
         raise RuntimeError(".app は macOS（osacompile が必要）でだけ作れる")
+    import json
+
+    from .applaunch import config_path
+
     python = python or sys.executable
     dest = Path(dest_dir).expanduser()
     dest.mkdir(parents=True, exist_ok=True)
     app = dest / f"{SNIP_APP_NAME}.app"
+    with tempfile.TemporaryDirectory() as td:
+        exe = Path(td) / AGENT_EXE
+        err = compile_agent(exe)
+        if err is None:
+            if app.exists():
+                shutil.rmtree(app)
+            (app / "Contents" / "MacOS").mkdir(parents=True)
+            res = app / "Contents" / "Resources"
+            res.mkdir()
+            shutil.copy2(exe, app / "Contents" / "MacOS" / AGENT_EXE)
+            (res / "agent.json").write_text(json.dumps({"python": python, "config": str(config_path()),
+                                                         "log": str(log_path())}, ensure_ascii=False), encoding="utf-8")
+            info = {**_common_info(SNIP_APP_NAME, SNIP_BUNDLE_ID), "CFBundleExecutable": AGENT_EXE, "CFBundlePackageType": "APPL",
+                    "CFBundleInfoDictionaryVersion": "6.0", "CFBundleVersion": "1", "LSUIElement": True,
+                    "LSMinimumSystemVersion": "11.0", "NSHighResolutionCapable": True,
+                    "NSScreenCaptureUsageDescription": "Reads the area of the screen you select. Images never leave this Mac."}
+            (app / "Contents" / "Info.plist").write_bytes(plistlib.dumps(info))
+            if _icns(res / "applet.icns"):
+                info["CFBundleIconFile"] = "applet"
+                (app / "Contents" / "Info.plist").write_bytes(plistlib.dumps(info))
+            subprocess.run(["codesign", "--force", "--deep", "-s", "-", str(app)], check=True, capture_output=True, text=True)
+            if register and Path(LSREGISTER).exists():
+                subprocess.run([LSREGISTER, "-f", str(app)], check=False, capture_output=True)
+            _remember_snip_app(app)
+            return app
+    print(f"注意: メニューバーのアプリを作れなかったので、全体のショートカットは使えません（理由: {err}）。"
+          "起動するたびに Snip するだけのアプリを作ります。", file=sys.stderr)
     _compile(app, snip_applescript(python))
     _finish(app, {**_common_info(SNIP_APP_NAME, SNIP_BUNDLE_ID),
-                  "NSScreenCaptureUsageDescription": "画面の選んだ範囲を読み取るために使います（画像は外部に送りません）。"}, register)
+                  "NSScreenCaptureUsageDescription": "Reads the area of the screen you select. Images never leave this Mac."}, register)
+    _remember_snip_app(app)
     return app
+
+
+def _remember_snip_app(app: Path):
+    from .applaunch import write_config
+
+    write_config({"snip_app": str(app)})

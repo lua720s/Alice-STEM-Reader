@@ -279,7 +279,14 @@ class SnipStore:
         tmp.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self.path)
 
-    def add(self, png: bytes, result: dict, source: dict, engine: dict, extra: dict | None = None) -> dict:
+    def new_entry(self, fmt: str = "latex") -> dict:
+        """画像のない、書くための記録（Mathpix の Snip エディタに相当）。fmt: latex（数式）/ markdown（文章＋数式）。"""
+        if fmt not in ("latex", "markdown"):
+            raise SnipError("fmt は latex か markdown")
+        kind = "math" if fmt == "latex" else "mixed"
+        return self.add(None, {"kind": kind, "latex": ""}, {"type": "editor", "format": fmt}, {"name": "editor", "version": "-"})
+
+    def add(self, png: bytes | None, result: dict, source: dict, engine: dict, extra: dict | None = None) -> dict:
         sid = time.strftime("s%Y%m%d-%H%M%S-") + secrets.token_hex(3)
         rec = {"id": sid, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "source": source, "engine": engine,
                "kind": result.get("kind"), "latex": result.get("latex"), "ocr_raw": result.get("raw"),
@@ -287,7 +294,9 @@ class SnipStore:
                "edited": False, **(extra or {})}
         with self.lock:
             self.root.mkdir(parents=True, exist_ok=True)
-            (self.root / f"{sid}.png").write_bytes(png)
+            if png is not None:
+                (self.root / f"{sid}.png").write_bytes(png)
+            rec["has_image"] = png is not None
             items = self._load()
             items.append(rec)
             drop = items[:-HISTORY_MAX] if len(items) > HISTORY_MAX else []
@@ -395,6 +404,8 @@ def source_label(src: dict) -> str:
         return f"{src.get('name', '?')} p.{(src.get('page') or 0) + 1}"
     if t == "screen":
         return "画面"
+    if t == "editor":
+        return "エディタ"
     return src.get("name") or {"paste": "貼り付けた画像", "image": "画像"}.get(t, "画像")
 
 

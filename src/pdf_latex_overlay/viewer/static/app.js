@@ -3,7 +3,9 @@
 "use strict";
 
 const T = (k, v) => (window.ploI18n ? window.ploI18n.t(k, v) : k);
-const token = new URLSearchParams(location.hash.slice(1)).get("token") || sessionStorage.getItem("plo-token") || "";
+const HASH = new URLSearchParams(location.hash.slice(1));
+const token = HASH.get("token") || sessionStorage.getItem("plo-token") || "";
+const INITIAL_CMD = { view: HASH.get("view"), new: HASH.get("new") };  // アプリ・ショートカットから（#view=snips&new=latex）
 if (token) { sessionStorage.setItem("plo-token", token); history.replaceState(null, "", location.pathname); }
 
 const $ = (id) => document.getElementById(id);
@@ -1208,38 +1210,8 @@ function wire() {
     finally { $("export").disabled = false; }
   };
 
-  // キーボード: ページ送りは SpeakerDeck と同じ（←→・Space・PageUp/Down・Home/End）
-  document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") { state.redrawFor = null; return; }
-    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    const t = ev.target;
-    if (t.closest && t.closest("input, textarea, select, [contenteditable], .menu, dialog")) return;
-    if (t.closest && t.closest("#tree") && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(ev.key)) return;
-    const fitPage = state.fit === "page" && !zoomed();
-    let handled = true;
-    switch (ev.key) {
-      case "ArrowRight": case "PageDown": case "j": goto(state.cur + 1); break;
-      case "ArrowLeft": case "PageUp": case "k": goto(state.cur - 1); break;
-      case " ": goto(state.cur + (ev.shiftKey ? -1 : 1)); break;
-      case "ArrowDown": if (fitPage) goto(state.cur + 1); else handled = false; break;
-      case "ArrowUp": if (fitPage) goto(state.cur - 1); else handled = false; break;
-      case "Home": goto(0); break;
-      case "End": goto(slots.length - 1); break;
-      case "+": case "=": setZoom(state.zoom * 1.25); break;
-      case "-": case "_": setZoom(state.zoom / 1.25); break;
-      case "0": setZoom(1); break;
-      case "f": setFit(state.fit === "page" ? "width" : "page"); toast(state.fit === "page" ? T("表示: ページ全体") : T("表示: 幅に合わせる"), 1100); break;
-      case "b": setSidebar(!$("layout").classList.contains("sb-open"), true); break;
-      case "/": $("tree-filter").focus(); $("tree-filter").select(); break;
-      case "c": if (state.selected) copyLatex(); else handled = false; break;
-      case "Delete": case "Backspace": if (state.selected) deleteFormula(state.selected); else handled = false; break;
-      case "n": case "N": nextReview(ev.shiftKey || ev.key === "N" ? -1 : 1); break;
-      case "s": snipScreen(); break;
-      case "r": setSnipDrag(!snipUI.dragMode); break;
-      default: handled = false;
-    }
-    if (handled) ev.preventDefault();
-  });
+  // キーボード: 割り当ては keys.js（Mathpix に合わせた既定。設定で変えられる）
+  document.addEventListener("keydown", onKey);
 }
 
 // 認識の進み具合を 1 回だけ読んで画面に反映し、次に読むまでの間隔（ミリ秒）を返す
@@ -1309,6 +1281,7 @@ document.addEventListener("plo-lang", () => {
 
 // 設定の画面
 function renderSettings() {
+  renderKeymap($("keymap"), true);
   for (const r of document.querySelectorAll('#settings input[name="delim"]')) r.checked = r.value === settings.delim;
   $("set-single").checked = settings.single;
   $("set-single").disabled = settings.delim === "none";
@@ -1317,9 +1290,10 @@ function renderSettings() {
 }
 $("settings-btn").addEventListener("click", () => { renderSettings(); $("settings").showModal(); });
 for (const r of document.querySelectorAll('#settings input[name="delim"]')) {
-  r.addEventListener("change", () => { settings.delim = r.value; LS.set("plo-delim", r.value); renderSettings(); });
+  r.addEventListener("change", () => { settings.delim = r.value; LS.set("plo-delim", r.value); renderSettings(); pushDelim(); });
 }
-$("set-single").addEventListener("change", () => { settings.single = $("set-single").checked; LS.set("plo-delim-single", settings.single ? "1" : "0"); renderSettings(); });
+$("set-single").addEventListener("change", () => { settings.single = $("set-single").checked; LS.set("plo-delim-single", settings.single ? "1" : "0"); renderSettings(); pushDelim(); });
+function pushDelim() { api("POST", "/api/settings", { delim: settings.delim, single: settings.single }).catch(() => {}); }  // メニューバーの Snip のコピーにも使う
 
 
 // ---- PDF・フォルダを開く（macOS の選択画面を、ビューアの中から出す。.app の起動時の選択画面は、これに統合した）
@@ -1353,6 +1327,7 @@ function snipSourceLabel(src) {
   if (!src) return "";
   if (src.type === "document") return T("{name} {p} ページ", { name: src.name || "", p: (src.page || 0) + 1 });
   if (src.type === "screen") return T("画面");
+  if (src.type === "editor") return T("エディタ");
   return src.name || (src.type === "paste" ? T("貼り付けた画像") : T("画像"));
 }
 function snipCopyText(rec, text) {
@@ -1376,7 +1351,8 @@ function renderSnipItem(rec) {
   if (rec.engine && rec.engine.name) when.title = `${rec.engine.name} ${rec.engine.version || ""}`.trim();
   meta.append(kind, src, sp, when);
   const img = document.createElement("img"); img.alt = T("切り取った画像"); img.loading = "lazy";
-  api("GET", `/api/snips/${encodeURIComponent(rec.id)}.png`).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.remove());
+  if (rec.has_image === false) img.remove();
+  else api("GET", `/api/snips/${encodeURIComponent(rec.id)}.png`).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.remove());
   const pv = document.createElement("div"); pv.className = "preview";
   const ta = document.createElement("textarea"); ta.rows = Math.min(6, Math.max(2, (rec.latex || "").split("\n").length + 1)); ta.spellcheck = false;
   ta.value = rec.latex || ""; ta.setAttribute("aria-label", T("読み取った内容（修正可）"));
@@ -1438,15 +1414,19 @@ function renderSnipItem(rec) {
 }
 function renderSnips() {
   const list = $("sniplist"); list.textContent = "";
-  for (const rec of snipUI.items.slice(0, snipUI.limit)) list.append(renderSnipItem(rec));
+  for (const rec of snipUI.items.slice(0, 3)) list.append(renderSnipItem(rec));  // 全部はダッシュボードで
+  if (window.renderDash && dashboardOpen()) window.renderDash();
   if (!snipUI.items.length) { const p = document.createElement("p"); p.className = "muted small"; p.textContent = T("まだ Snip はありません。"); list.append(p); }
-  $("snip-more").hidden = snipUI.items.length <= snipUI.limit;
   $("snip-count").textContent = snipUI.items.length ? T("{n} 件", { n: snipUI.items.length }) : "";
 }
 async function loadSnips() {
-  try { const r = await api("GET", "/api/snips?limit=1000"); snipUI.items = r.items || []; renderSnips(); } catch (e) { /* 次回 */ }
+  try { const r = await api("GET", "/api/snips?limit=5000"); snipUI.items = r.items || []; renderSnips(); } catch (e) { /* 次回 */ }
 }
-function addSnip(rec) { snipUI.fresh = rec.id; snipUI.items = [rec, ...snipUI.items.filter((x) => x.id !== rec.id)]; renderSnips(); $("sniplist").scrollTop = 0; }
+function addSnip(rec) {
+  snipUI.fresh = rec.id; snipUI.items = [rec, ...snipUI.items.filter((x) => x.id !== rec.id)];
+  if (window.addSnipHook) window.addSnipHook(rec);
+  renderSnips(); $("sniplist").scrollTop = 0;
+}
 function snipBusy(on) { for (const id of ["snip-screen", "snip-top"]) $(id).classList.toggle("busy", on); }
 
 async function snipScreen() {
@@ -1502,7 +1482,7 @@ $("snip-drag").setAttribute("aria-pressed", String(snipUI.dragMode));
 $("deck").classList.toggle("snipping", snipUI.dragMode);
 $("snip-file").addEventListener("click", () => $("snip-input").click());
 $("snip-input").addEventListener("change", () => { const fs = $("snip-input").files; if (fs && fs.length) snipFiles(fs, "image"); $("snip-input").value = ""; });
-$("snip-more").addEventListener("click", () => { snipUI.limit += 30; renderSnips(); });
+$("snip-more").addEventListener("click", () => showDashboard(true));
 document.addEventListener("paste", (ev) => {
   const t = ev.target;
   if (t && t.closest && t.closest("input, textarea, [contenteditable]")) return;  // 文字の貼り付けは邪魔しない
@@ -1549,3 +1529,143 @@ $("snip-export").addEventListener("click", () => menuAt($("snip-export"), [
 ]));
 document.addEventListener("plo-lang", () => renderSnips());
 loadSnips();
+
+
+// ============================================================ キーボードショートカット（keys.js の割り当てで動かす）
+const K = window.ploKeys;
+function inEditable(t) { return t && t.closest && t.closest("input, textarea, select, [contenteditable], .menu, dialog"); }
+function dashboardOpen() { return !$("dash").hidden; }
+const ACTION_RUN = {
+  snipScreen: () => snipScreen(),
+  openApp: () => showDashboard(false),
+  newLatex: () => dashNew("latex"),
+  newMarkdown: () => dashNew("markdown"),
+  toggleDashboard: () => showDashboard(!dashboardOpen()),
+  snipRegion: () => setSnipDrag(!snipUI.dragMode),
+  nextPage: () => goto(state.cur + 1),
+  prevPage: () => goto(state.cur - 1),
+  firstPage: () => goto(0),
+  lastPage: () => goto(slots.length - 1),
+  zoomIn: () => setZoom(state.zoom * 1.25),
+  zoomOut: () => setZoom(state.zoom / 1.25),
+  zoomReset: () => setZoom(1),
+  toggleFit: () => { setFit(state.fit === "page" ? "width" : "page"); toast(state.fit === "page" ? T("表示: ページ全体") : T("表示: 幅に合わせる"), 1100); },
+  toggleSidebar: () => setSidebar(!$("layout").classList.contains("sb-open"), true),
+  search: () => { $("tree-filter").focus(); $("tree-filter").select(); },
+  copyFormula: () => (state.selected ? (copyLatex(), true) : false),
+  deleteBox: () => (state.selected ? (deleteFormula(state.selected), true) : false),
+  nextReview: () => nextReview(1),
+  prevReview: () => nextReview(-1),
+  recognizePage: () => $("autorun").click(),
+  recognizeText: () => $("textrun").click(),
+  openDocument: () => pickOpen("pdf"),
+  savePdf: () => $("export").click(),
+  exportMarkdown: () => (state.doc ? exportDocText("md") : toast(T("資料を選んでください"))),
+  settings: () => { renderSettings(); $("settings").showModal(); },
+  shortcuts: () => showShortcutSheet(),
+};
+function onKey(ev) {
+  if (ev.defaultPrevented || ev.isComposing) return;
+  if (capture.active) return;  // 設定画面で、キーを登録しているところ
+  const dash = dashboardOpen();
+  if (ev.key === "Escape" && !dash) state.redrawFor = null;
+  const t = ev.target;
+  const editing = inEditable(t);
+  const b = K.fromEvent(ev);
+  if (!b) return;
+  if (!editing && t.closest && t.closest("#tree") && /^(Shift\+)?(Arrow\w+|Home|End|Enter|Space)$/.test(b)) return;  // ツリーは自分で扱う
+  // ページ全体の表示では、↑↓ もページ送り（幅に合わせる・拡大中は、普通のスクロール）
+  if (!dash && !editing && (b === "ArrowDown" || b === "ArrowUp")) {
+    if (state.fit === "page" && !zoomed()) { goto(state.cur + (b === "ArrowDown" ? 1 : -1)); ev.preventDefault(); }
+    return;
+  }
+  const id = K.match(ev, dash ? ["dashboard", "global"] : ["reader", "global"]);
+  if (!id) return;
+  // 入力欄の中では、⌃・⌘ を使う割り当てだけを受け付ける（文字の入力を邪魔しない）
+  if (editing && !/(^|\+)(Ctrl|Cmd)\+/.test(b)) return;
+  const run = ACTION_RUN[id] || (window.dashAction && ((e) => window.dashAction(id, e)));
+  if (!run) return;
+  if (run(ev) !== false) ev.preventDefault();
+}
+
+// ---- 設定画面: キーボードショートカット
+const capture = { active: null };
+const GROUP_LABEL = { global: "全体（ほかのアプリの上でも。メニューバーの Snip アプリが動いているとき）", reader: "資料を読む画面", dashboard: "Snip のダッシュボード" };
+function renderKeymap(container, editable) {
+  container.textContent = "";
+  for (const g of ["global", "reader", "dashboard"]) {
+    const h = document.createElement("h3"); h.textContent = T(GROUP_LABEL[g]); container.append(h);
+    const table = document.createElement("div"); table.className = "keymap"; table.setAttribute("role", "table");
+    for (const a of K.ACTIONS.filter((x) => x.group === g)) {
+      const row = document.createElement("div"); row.className = "krow"; row.setAttribute("role", "row");
+      const name = document.createElement("span"); name.className = "kname"; name.textContent = T(a.label); name.setAttribute("role", "cell");
+      const keys = document.createElement("span"); keys.className = "kkeys"; keys.setAttribute("role", "cell");
+      const bs = K.bindings(a.id);
+      if (editable) {
+        const btn = document.createElement("button"); btn.type = "button"; btn.className = "kcap";
+        btn.textContent = K.label(K.primary(a.id)); btn.title = T("クリックして、新しいキーを押す（Esc で取り消し、⌫ で割り当てなし）");
+        btn.setAttribute("aria-label", T("{a} のショートカットを変更（いまは {k}）", { a: T(a.label), k: K.label(K.primary(a.id)) }));
+        btn.addEventListener("click", () => startCapture(a, btn, container));
+        keys.append(btn);
+        for (const x of bs.slice(1)) { const k = document.createElement("kbd"); k.textContent = K.label(x); k.title = T("変更しない別の割り当て"); keys.append(k); }
+        const rs = document.createElement("button"); rs.type = "button"; rs.className = "kreset"; rs.textContent = "↺";
+        rs.title = T("既定に戻す（{k}）", { k: K.label(a.keys[0]) }); rs.setAttribute("aria-label", rs.title);
+        rs.hidden = K.primary(a.id) === K.normalize(a.keys[0]);
+        rs.addEventListener("click", () => { K.reset(a.id); afterKeymapChange(a); renderKeymap(container, true); });
+        keys.append(rs);
+      } else {
+        for (const x of bs) { const k = document.createElement("kbd"); k.textContent = K.label(x); keys.append(k); }
+        if (!bs.length) keys.textContent = "—";
+      }
+      row.append(name, keys); table.append(row);
+    }
+    container.append(table);
+  }
+  if (!editable) {
+    const p = document.createElement("p"); p.className = "muted small";
+    p.textContent = T("編集中: Enter で改行、⇧Enter か ⌃Enter で保存、Esc で取り消し。割り当ては 設定（{k}）で変えられます。", { k: K.label(K.primary("settings")) });
+    container.append(p);
+  }
+}
+function startCapture(a, btn, container) {
+  capture.active = a.id; btn.classList.add("capturing"); btn.textContent = T("キーを押してください…");
+  const onCap = (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const b = K.fromEvent(ev);
+    if (!b) return;  // 修飾キーだけ
+    document.removeEventListener("keydown", onCap, true);
+    capture.active = null;
+    if (b === "Escape") { renderKeymap(container, true); return; }
+    if (b === "Backspace" || b === "Delete") { K.set(a.id, ""); afterKeymapChange(a); renderKeymap(container, true); return; }
+    if (a.group === "global" && !K.hotkeyString(b)) { toast(T("全体のショートカットには、⌃・⌥・⌘ のどれかと、英数字・F キーを組み合わせてください"), 4500); renderKeymap(container, true); return; }
+    const c = K.conflict(a.id, b);
+    if (c) { toast(T("{k} は「{a}」に使われています", { k: K.label(b), a: T(c.label) }), 4000); renderKeymap(container, true); return; }
+    K.set(a.id, b); afterKeymapChange(a); renderKeymap(container, true);
+    toast(`${T(a.label)}: ${K.label(b)}`, 1600);
+  };
+  document.addEventListener("keydown", onCap, true);
+}
+async function afterKeymapChange(a) {
+  updateKeyHints();
+  if (a && a.group !== "global") return;
+  try { await api("POST", "/api/settings", { global_hotkeys: K.globalHotkeys() }); }  // メニューバーのアプリが読む
+  catch (e) { toast(T("全体のショートカットを保存できませんでした: {m}", { m: e.message }), 5000); }
+}
+$("keys-reset").addEventListener("click", async () => { K.reset(); await afterKeymapChange({ group: "global" }); renderKeymap($("keymap"), true); toast(T("ショートカットを既定に戻しました"), 1600); });
+function showShortcutSheet() { renderKeymap($("sheet-body"), false); $("sheet").showModal(); }
+$("sheet-settings").addEventListener("click", () => { $("sheet").close(); renderSettings(); $("settings").showModal(); });
+function updateKeyHints() {  // ボタンの説明（title）に、いまの割り当てを出す
+  const hint = (id) => K.label(K.primary(id));
+  $("snip-top").title = `${T("画面の一部を Snip して読む")} (${hint("snipScreen")})`;
+  $("snip-screen").title = `${T("画面の範囲をドラッグで選んで読む。結果はクリップボードへ")} (${hint("snipScreen")})`;
+  $("snip-drag").title = `${T("ページ上のドラッグを、枠の追加ではなく Snip にする")} (${hint("snipRegion")})`;
+  $("dash-open").title = `${T("Snip のダッシュボード")} (${hint("toggleDashboard")})`;
+}
+async function syncSettingsFromServer() {
+  try {
+    const r = await api("GET", "/api/settings");
+    K.applyServer(r.global_hotkeys_custom);
+    updateKeyHints();
+  } catch (e) { /* 古いサーバー */ }
+}
+syncSettingsFromServer();

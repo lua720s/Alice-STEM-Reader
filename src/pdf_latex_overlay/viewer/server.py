@@ -28,7 +28,7 @@ from .hub import Hub
 from .session import SessionError, ViewerSession, valid_id
 
 STATIC = Path(__file__).resolve().parent / "static"
-STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js", "i18n.js", "icon.svg",
+STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js", "i18n.js", "icon.svg", "keys.js", "dashboard.js",
                 "vendor/katex/katex.min.js", "vendor/katex/katex.min.css"}
 _VENDOR_FONT = re.compile(r"^vendor/katex/fonts/KaTeX_[A-Za-z0-9_-]+\.woff2$")
 
@@ -175,6 +175,37 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                     b = self._body()
                     return self._json(200, hub.snip_screen(mode=b.get("mode", "auto"), copy=b.get("copy") is not False,
                                                            delim=b.get("delim", "paren"), single=b.get("single") is True))
+                if method == "POST" and path == "/api/snips/new":
+                    b = self._body()
+                    return self._json(200, hub.snips().new_entry(b.get("format", "latex")))
+                if method == "POST" and path == "/api/ui/push":
+                    return self._json(200, hub.ui_push(self._body()))
+                if method == "GET" and path == "/api/ui/pull":
+                    return self._json(200, {"commands": hub.ui_pull()})
+                if method == "GET" and path == "/api/settings":
+                    from .. import applaunch
+
+                    cfg = applaunch.read_config()
+                    return self._json(200, {"global_hotkeys": applaunch.global_hotkeys(), "defaults": applaunch.GLOBAL_HOTKEYS,
+                                            "global_hotkeys_custom": cfg.get("global_hotkeys") or {},
+                                            "delim": cfg.get("delim", "paren"), "single": bool(cfg.get("single", False))})
+                if method == "POST" and path == "/api/settings":
+                    from .. import applaunch
+                    from ..delims import STYLES
+
+                    b = self._body()
+                    upd = {}
+                    if "global_hotkeys" in b:
+                        upd["global_hotkeys"] = applaunch.clean_hotkeys(b["global_hotkeys"])
+                    if "delim" in b:
+                        if b["delim"] not in STYLES:
+                            raise SessionError("delim が不正")
+                        upd["delim"] = b["delim"]
+                    if "single" in b:
+                        upd["single"] = b["single"] is True
+                    cfg = applaunch.write_config(upd) if upd else applaunch.read_config()
+                    return self._json(200, {"global_hotkeys": applaunch.global_hotkeys(), "delim": cfg.get("delim", "paren"),
+                                            "single": bool(cfg.get("single", False))})
                 if method == "POST" and path == "/api/snips/export":
                     b = self._body()
                     text, ctype, fname = hub.snips().export(b.get("fmt"), b.get("ids"), delim=b.get("delim", "paren"))

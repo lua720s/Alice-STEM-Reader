@@ -84,6 +84,51 @@ def run_hook(name: str = "on-launch") -> bool:
     return True
 
 
+GLOBAL_HOTKEYS = {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+o", "latex": "ctrl+cmd+l", "markdown": "ctrl+cmd+n"}  # Mathpix Snip と同じ
+_HOTKEY_RE = __import__("re").compile(r"^((ctrl|alt|shift|cmd)\+){1,4}([a-z0-9]|f([1-9]|1[0-9])|space)$")
+
+
+def read_config() -> dict:
+    try:
+        d = json.loads(config_path().read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_config(update: dict) -> dict:
+    """app.json に書き足す（他の項目は残す）。メニューバーの Snip アプリも、この内容を読む。"""
+    cfg = read_config()
+    cfg.update(update)
+    support_dir().mkdir(parents=True, exist_ok=True)
+    tmp = config_path().with_name("app.json.tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, config_path())
+    return cfg
+
+
+def clean_hotkeys(d) -> dict:
+    """全体のショートカット（"ctrl+cmd+m" の形。空文字は無効）を検査する。"""
+    if not isinstance(d, dict):
+        raise ValueError("global_hotkeys はオブジェクト")
+    out = {}
+    for k, v in d.items():
+        if k not in GLOBAL_HOTKEYS or not isinstance(v, str):
+            raise ValueError(f"未知のショートカット: {k}")
+        v = v.strip().lower()
+        if v and not _HOTKEY_RE.match(v):
+            raise ValueError(f"ショートカットの形が不正: {v}")
+        out[k] = v
+    used = [v for v in out.values() if v]
+    if len(used) != len(set(used)):
+        raise ValueError("同じキーが、複数の動作に割り当てられている")
+    return out
+
+
+def global_hotkeys() -> dict:
+    return {**GLOBAL_HOTKEYS, **(read_config().get("global_hotkeys") or {})}
+
+
 def read_state() -> dict | None:
     try:
         st = json.loads(state_path().read_text(encoding="utf-8"))
@@ -169,7 +214,7 @@ def _spawn(roots: list[str], backend: str, wait_s: float) -> dict:
 
 
 def app_open(files: list[str] | None = None, folder: str | None = None, backend: str = "unimernet",
-             wait_s: float = 60.0, opener=webbrowser.open) -> dict:
+             wait_s: float = 60.0, opener=webbrowser.open, view: str | None = None, new: str | None = None) -> dict:
     """PDF（複数可）またはフォルダをビューアで開く。動いていれば再利用する。"""
     files = [str(Path(f).expanduser()) for f in (files or [])]
     from .docformats import is_supported
@@ -194,9 +239,14 @@ def app_open(files: list[str] | None = None, folder: str | None = None, backend:
         ids = _call(st, "POST", "/api/addfiles", {"paths": [str(Path(f).resolve()) for f in files]})["ids"]
         _call(st, "POST", "/api/open", {"id": ids[0], "auto": False}, timeout=60.0)  # 開いただけでは認識しない（「このページを認識」で行う。事前OCRの結果はそのまま読み込む）
         opened = ids[0]
-    # すでに画面が開いている（直前まで通信があった）ときは、新しいタブを開かない。画面は、開いた PDF に追従する
+    if view not in (None, "reader", "snips", "settings") or new not in (None, "latex", "markdown"):
+        raise ValueError("view は reader / snips / settings、new は latex / markdown")
+    cmd = {k: v for k, v in (("view", "snips" if new else view), ("new", new)) if v}
+    # すでに画面が開いている（直前まで通信があった）ときは、新しいタブを開かない。画面は、開いた資料と、送った指示に追従する
     if fresh or st.get("idle_s", 999) > 8:
-        opener(st["url"])
+        opener(st["url"] + "".join(f"&{k}={v}" for k, v in cmd.items()))
+    elif cmd:
+        _call(st, "POST", "/api/ui/push", cmd)
     return {"url": st["url"], "fresh": fresh, "opened": opened, "pid": st["pid"]}
 
 
@@ -216,11 +266,7 @@ def app_snip(mode: str = "auto", backend: str = "unimernet", wait_s: float = 60.
     from .snip import notify as _notify
 
     st = running_state() or _spawn([], backend, wait_s)
-    cfg = {}
-    try:
-        cfg = json.loads(config_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        pass
+    cfg = read_config()
     body = {"mode": mode, "copy": True, "delim": cfg.get("delim", "paren"), "single": bool(cfg.get("single", False))}
     r = _call(st, "POST", "/api/snip/screen", body, timeout=600.0)
     if notify and not r.get("cancelled"):
@@ -229,3 +275,19 @@ def app_snip(mode: str = "auto", backend: str = "unimernet", wait_s: float = 60.
         else:
             _notify(APP_NAME, "読み取れませんでした" + (f"（{r.get('error')}）" if r.get("error") else ""))
     return r
+
+
+def ensure_agent() -> bool:
+    """メニューバーの Snip アプリ（全体のショートカット）が動いていなければ、裏で起動する（Snip はしない）。"""
+    if sys.platform != "darwin":
+        return False
+    app = read_config().get("snip_app")
+    exe = Path(app) / "Contents" / "MacOS" / "AliceSTEMSnip" if app else None
+    if not exe or not exe.is_file():
+        return False  # アプレット版（ショートカットなし）か、まだ作っていない
+    r = subprocess.run(["/usr/bin/pgrep", "-f", str(exe)], capture_output=True)
+    if r.returncode == 0:
+        return True
+    subprocess.Popen(["/usr/bin/open", "-g", "-j", str(app), "--args", "--background"], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return True
