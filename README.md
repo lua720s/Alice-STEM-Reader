@@ -1,4 +1,4 @@
-# Alice STEM PDF Reader
+# Alice STEM Reader (Alice-STEM-Reader)
 
 PDF上で数式を選択し、編集可能な LaTeX としてコピーできる派生PDFを生成する独立プロジェクト。元PDFは読み取り専用とし、ページの見た目を維持する。
 
