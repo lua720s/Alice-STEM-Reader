@@ -20,6 +20,8 @@ keywords = ["OCR", "LaTeX", "math", "PDF", "EPUB", "DjVu", "STEM", "snip", "hand
 classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
   "Topic :: Scientific/Engineering :: Mathematics",
   "Topic :: Text Processing :: Markup :: LaTeX",
   "Intended Audience :: Education",
@@ -29,6 +31,8 @@ classifiers = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "matplotlib>=3.8", "pillow>=10"]
 heic = ["pillow-heif>=0.16"]  # iPhone の写真（HEIC）。macOS では無くても sips で読める
+app = ["pywebview>=5"]  # Chrome・Edge がないときに、画面をアプリのウィンドウで開く
+hotkeys = ["pynput>=1.7; sys_platform == 'linux'"]  # Linux（X11）の全体のショートカット。Windows は追加なし、macOS はメニューバーのアプリ
 # UniMERNet は重みとともにプロジェクト内に導入する（MODELS.md 参照）
 ml = ["torch>=2.2", "transformers>=4.40", "pillow>=10"]
 

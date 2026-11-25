@@ -83,13 +83,9 @@ def list_library(library=None) -> list[dict]:
 
 # ---------------------------------------------------------------- 排他
 def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+    from .osutil import pid_alive
+
+    return pid_alive(pid)  # Windows では os.kill(pid, 0) が Ctrl+C を送るので、OS ごとに調べる
 
 
 def lock_holder(path: Path) -> int | None:

@@ -15,6 +15,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+from ..osutil import no_window, venv_python
+
 from .base import Recognition, RecognizerUnavailable
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -76,7 +78,7 @@ class UniMERNetBackend:
 
     def __init__(self, model_dir=None, python=None, device="cpu", timeout_s: float = 120.0, threads: int = 0):
         self.model_dir = Path(model_dir or os.environ.get("PLO_UNIMERNET_DIR") or ROOT / "models" / "unimernet_base")
-        self.python = Path(python or os.environ.get("PLO_ML_PYTHON") or ROOT / ".venv-ml" / "bin" / "python")
+        self.python = Path(python or os.environ.get("PLO_ML_PYTHON") or venv_python(ROOT / ".venv-ml"))
         self.device = device
         self.timeout_s = timeout_s
         self.threads = threads
@@ -95,11 +97,11 @@ class UniMERNetBackend:
         if self.proc and self.proc.poll() is None:
             return
         self._check()
-        cmd = [str(self.python), "-I", str(WORKER), "--model-dir", str(self.model_dir), "--device", self.device]
+        cmd = [str(self.python), "-I", "-X", "utf8", str(WORKER), "--model-dir", str(self.model_dir), "--device", self.device]
         if self.threads:
             cmd += ["--threads", str(self.threads)]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     text=True, bufsize=1)
+                                     text=True, encoding="utf-8", bufsize=1, **no_window())
         line = self._readline(timeout=max(self.timeout_s, 300))
         if not line:
             self.close()

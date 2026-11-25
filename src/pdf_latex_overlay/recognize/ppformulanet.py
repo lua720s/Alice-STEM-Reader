@@ -16,6 +16,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+from ..osutil import no_window, venv_python
+
 from .base import Recognition, RecognizerUnavailable
 from .unimernet import tidy_latex
 
@@ -38,7 +40,7 @@ class PPFormulaNetBackend:
         self.model_name = model_name or os.environ.get("PLO_PP_MODEL") or DEFAULT_MODEL
         base = Path(os.environ.get("PLO_PP_DIR") or ROOT / "models" / "pp_cache" / "official_models")
         self.model_dir = Path(model_dir or base / self.model_name)
-        self.python = Path(python or os.environ.get("PLO_PP_PYTHON") or ROOT / ".venv-pp" / "bin" / "python")
+        self.python = Path(python or os.environ.get("PLO_PP_PYTHON") or venv_python(ROOT / ".venv-pp"))
         self.timeout_s = timeout_s
         self.threads = threads
         self.proc: subprocess.Popen | None = None
@@ -56,11 +58,11 @@ class PPFormulaNetBackend:
         if self.proc and self.proc.poll() is None:
             return
         self._check()
-        cmd = [str(self.python), "-I", str(WORKER), "--model-dir", str(self.model_dir), "--model-name", self.model_name]
+        cmd = [str(self.python), "-I", "-X", "utf8", str(WORKER), "--model-dir", str(self.model_dir), "--model-name", self.model_name]
         if self.threads:
             cmd += ["--threads", str(self.threads)]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     text=True, bufsize=1)
+                                     text=True, encoding="utf-8", bufsize=1, **no_window())
         line = self._readline(timeout=max(self.timeout_s, 300))
         if not line:
             self.close()

@@ -5,6 +5,8 @@ import shutil
 
 import numpy as np
 import pymupdf
+import sys
+
 import pytest
 
 from pdf_latex_overlay import coords, pdfcheck, safety
@@ -97,6 +99,7 @@ def test_iou():
     assert abs(coords.iou((0, 0, 10, 10), (5, 0, 15, 10)) - 1 / 3) < 1e-9
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="シンボリックリンク（Windows では管理者権限が要る）")
 def test_safety_paths(fx, tmp_path):
     src = tmp_path / "in.pdf"
     shutil.copy(fx["vector"], src)

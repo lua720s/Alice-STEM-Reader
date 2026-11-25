@@ -20,14 +20,15 @@ window.showDashboard = showDashboard;
 // ---- 形式（コピーできる書き方の一覧）
 function formatRows(rec, base) {
   const t = base ?? (rec.latex || "");
-  const rows = [];
+  const rows = [{ label: T("設定の形式"), text: PF.copyText(rec.kind, t, prefs.format) }];  // 先頭は、設定（出力の形式）どおり
+  const F = prefs.format;
   if (rec.kind === "math") {
-    const multi = t.trim().includes("\n");
-    rows.push({ label: "LaTeX", text: t });
-    rows.push({ label: "LaTeX  \\( … \\)", text: multi ? `\\[\n${t}\n\\]` : `\\(${t}\\)` });
-    rows.push({ label: "LaTeX  \\[ … \\]", text: `\\[\n${t}\n\\]` });
-    rows.push({ label: "Markdown  $ … $", text: multi ? `$$\n${t}\n$$` : `$${t}$` });
-    rows.push({ label: "Markdown  $$ … $$", text: `$$\n${t}\n$$` });
+    rows.push({ label: "LaTeX", text: PF.formatMath(t, { ...F, multiline: "lines" }, "raw") });
+    rows.push({ label: "LaTeX  \\( … \\)", text: PF.formatMath(t, { ...F, inline: "paren", display: "bracket" }, "auto") });
+    rows.push({ label: "LaTeX  \\[ … \\]", text: PF.formatMath(t, { ...F, display: "bracket" }, "display") });
+    rows.push({ label: "LaTeX  aligned", text: PF.formatMath(t, { ...F, multiline: "aligned", display: "bracket" }, "display") });
+    rows.push({ label: "Markdown  $ … $", text: PF.formatMath(t, { ...F, inline: "dollar", display: "dollars" }, "auto") });
+    rows.push({ label: "Markdown  $$ … $$", text: PF.formatMath(t, { ...F, display: "dollars" }, "display") });
   } else {
     rows.push({ label: `${T("文章＋数式")}  \\( … \\)`, text: t });
     rows.push({ label: "Markdown  $ … $", text: convertDelims(t, "dollar") });
@@ -35,7 +36,8 @@ function formatRows(rec, base) {
   }
   if (rec.text_layer) rows.push({ label: T("文字層（資料に埋め込まれた文字）"), text: rec.text_layer });
   if (rec.alt_latex) rows.push({ label: T("もう一方のモデルの読み"), text: rec.alt_latex });
-  return rows.filter((r) => r.text);
+  const seen = new Set();  // 同じ中身の行は 1 つに
+  return rows.filter((r) => r.text && !seen.has(r.text) && seen.add(r.text));
 }
 
 function renderMixedInto(el, text, kind) {
@@ -319,16 +321,11 @@ $("dash-new").addEventListener("click", () => menuAt($("dash-new"), [
 $("dash-export").addEventListener("click", () => {
   const ids = dash.picked.size ? [...dash.picked] : filtered().map((r) => r.id);
   const go = async (fmt) => {
-    try { const n = await downloadPost("/api/snips/export", { fmt, ids, delim: settings.delim }, `snips.${fmt}`); toast(T("書き出しました: {n}", { n }), 2500); }
+    try { const n = await downloadPost("/api/snips/export", { fmt, ids }, `snips.${fmt}`); toast(T("書き出しました: {n}", { n }), 2500); }
     catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
   };
   const what = dash.picked.size ? T("選んだ {n} 件", { n: ids.length }) : T("表示中の {n} 件", { n: ids.length });
-  menuAt($("dash-export"), [
-    { label: `${what}: ${T("Markdown（$…$、レポート・ノート向け）")}`, run: () => go("md") },
-    { label: `${what}: ${T("LaTeX（論文の原稿向け）")}`, run: () => go("tex") },
-    { label: `${what}: ${T("TSV（フラッシュカードのアプリに読み込む）")}`, run: () => go("tsv") },
-    { label: `${what}: ${T("JSON（出所・エンジンの記録つき）")}`, run: () => go("json") },
-  ]);
+  menuAt($("dash-export"), exportMenu((fmt) => go(fmt), what));
 });
 $("dash-selall").addEventListener("click", () => {
   if (dash.picked.size) dash.picked.clear(); else for (const r of filtered()) dash.picked.add(r.id);

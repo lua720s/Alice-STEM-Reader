@@ -1,7 +1,7 @@
 """Snip: 画面・画像・資料の一部を切り取って、その部分だけを LaTeX / 文章にする（Mathpix Snip に相当）。
 
 入力
-- 画面の一部（macOS の `screencapture -i`。範囲をドラッグで選ぶ）
+- 画面の一部（macOS の `screencapture -i`、Windows の切り取り領域、Linux の grim+slurp など。範囲をドラッグで選ぶ）
 - 画像（ファイル・貼り付け・ドロップ）。手書きの式やノートの写真も可（EXIF の向きを補正する）
 - 開いている資料（PDF・EPUB・DjVu・Markdown・LaTeX など）の範囲。文字層がある資料では、
   OCR の結果に加えて、文字層の文字（Markdown・LaTeX の原稿なら原文そのもの）も返す
@@ -208,53 +208,36 @@ def text_layer(page: pymupdf.Page, view_rect) -> str:
 
 # ---------------------------------------------------------------- 画面の切り取り（macOS）
 def capture_screen(timeout_s: float = 300.0) -> bytes | None:
-    """画面の範囲をドラッグで選んで切り取る（macOS の screencapture -i）。Esc で取り消すと None。"""
-    if sys.platform != "darwin" or not shutil.which("screencapture"):
-        raise SnipError("画面の切り取りは macOS でだけ使える（他の環境では、スクリーンショットを貼り付けるかドロップする）", 501)
-    with tempfile.TemporaryDirectory() as td:
-        out = Path(td) / "snip.png"
-        try:
-            subprocess.run(["screencapture", "-i", "-x", "-t", "png", str(out)], timeout=timeout_s, check=False)
-        except subprocess.TimeoutExpired:
-            raise SnipError("画面の切り取りが時間内に終わらなかった", 408)
-        if not out.is_file() or out.stat().st_size == 0:
-            return None
-        return out.read_bytes()
+    """画面の範囲をドラッグで選んで切り取る（macOS: screencapture、Windows: 切り取り領域、Linux: grim+slurp など）。Esc で取り消すと None。"""
+    from .osutil import OSFeatureError, capture_screen as _cap
+
+    try:
+        return _cap(timeout_s)
+    except OSFeatureError as e:
+        raise SnipError(str(e), 501) from e
 
 
 def copy_to_clipboard(text: str) -> bool:
-    """結果をクリップボードに入れる（macOS: pbcopy）。できなければ False。"""
-    exe = shutil.which("pbcopy") if sys.platform == "darwin" else None
-    if not exe:
-        return False
-    try:
-        subprocess.run([exe], input=text.encode("utf-8"), timeout=10, check=True,
-                       env={**os.environ, "LANG": "en_US.UTF-8"})
-        return True
-    except (OSError, subprocess.SubprocessError):
-        return False
+    """結果をクリップボードに入れる（macOS・Windows・Linux）。できなければ False。"""
+    from .osutil import copy_to_clipboard as _copy
+
+    return _copy(text)
 
 
 def notify(title: str, message: str):
-    """macOS の通知（失敗しても無視）。"""
-    if sys.platform != "darwin":
-        return
-    esc = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')  # noqa: E731
-    try:
-        subprocess.run(["osascript", "-e", f'display notification "{esc(message[:200])}" with title "{esc(title)}"'],
-                       timeout=10, capture_output=True)
-    except (OSError, subprocess.SubprocessError):
-        pass
+    """OS の通知（失敗しても無視）。"""
+    from .osutil import notify as _notify
+
+    _notify(title, message)
 
 
-def format_for_copy(rec: dict, delim: str = "paren", single: bool = False) -> str:
-    """コピーする文字列（ビューアの設定と同じ規則で区切りを付ける）。"""
-    text = rec.get("latex") or ""
-    if delim not in STYLES:
-        delim = "paren"
-    if rec.get("kind") in ("mixed", "text"):
-        return convert_delims(text, delim)
-    return wrap_single(text, delim) if single else text
+def format_for_copy(rec: dict, fmt="paren", single: bool = False) -> str:
+    """コピーする文字列。fmt は出力の形式の設定（dict）。以前の形（"paren" などの文字列と single）も受け付ける。"""
+    from .outfmt import copy_text, from_legacy
+
+    if not isinstance(fmt, dict):
+        fmt = from_legacy(fmt if fmt in STYLES else "paren", single)
+    return copy_text(rec.get("kind"), rec.get("latex") or "", fmt)
 
 
 # ---------------------------------------------------------------- 履歴
@@ -358,8 +341,19 @@ class SnipStore:
                 pass
         return {"deleted": sid, "snip": rec}
 
-    def export(self, fmt: str, ids=None, delim: str = "paren", single: bool = False) -> tuple[str, str, str]:
-        """(本文, MIME, ファイル名)。fmt: md / tex / tsv / json。ids を省くと全部（古い順）。"""
+    def export(self, kind: str, ids=None, fmt: dict | None = None, exp: dict | None = None, delim: str | None = None,
+               **legacy) -> tuple[bytes, str, str]:
+        """書き出す。(中身, MIME, ファイル名)。kind: md / tex / tsv / csv / json。ids を省くと全部（古い順）。
+
+        fmt: 出力の形式の設定、exp: 書き出しの設定（outfmt.FORMAT_DEFAULTS・EXPORT_DEFAULTS）。
+        exp["include_images"] が真なら、Markdown・LaTeX は画像と一緒に ZIP にする。
+        """
+        from . import outfmt
+
+        fmt = outfmt.clean("format", fmt) if fmt is not None else outfmt.from_legacy(delim or "paren", False)
+        exp = outfmt.clean("export", exp)
+        if kind not in ("md", "tex", "tsv", "csv", "json"):
+            raise SnipError("fmt は md / tex / tsv / csv / json のいずれか")
         with self.lock:
             items = self._load()
         if ids is not None:
@@ -368,34 +362,58 @@ class SnipStore:
             want = set(ids)
             items = [r for r in items if r.get("id") in want]
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        if fmt == "json":
-            return json.dumps(items, ensure_ascii=False, indent=1), "application/json", f"snips-{stamp}.json"
-        if fmt == "tsv":
+        if kind == "json":
+            data = items if exp["include_source"] else [{k: v for k, v in r.items() if k not in ("source", "engine")} for r in items]
+            return json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8"), "application/json", f"snips-{stamp}.json"
+        if kind in ("tsv", "csv"):
             buf = io.StringIO()
-            w = csv.writer(buf, delimiter="\t", lineterminator="\n")
-            for r in items:  # 1 列目: 表（問い・メモ）、2 列目: 裏（読み取った内容）、3 列目: 出所
-                w.writerow([r.get("note") or source_label(r.get("source") or {}),
-                            format_for_copy(r, delim if delim != "none" else "paren", True).replace("\n", "<br>"),
-                            source_label(r.get("source") or {})])
-            return buf.getvalue(), "text/tab-separated-values", f"snips-{stamp}.tsv"
-        if fmt in ("md", "tex"):
-            parts = []
-            for r in items:
-                body = r.get("latex") or ""
-                if fmt == "md":
-                    head = f"<!-- {source_label(r.get('source') or {})} / {r.get('created', '')} -->"
-                    txt = convert_delims(body, "dollar") if r.get("kind") in ("mixed", "text") else wrap_single(body, "dollar") if body else ""
-                    parts.append(head + "\n" + (r.get("note") + "\n\n" if r.get("note") else "") + txt)
+            w = csv.writer(buf, delimiter="\t" if kind == "tsv" else ",", lineterminator="\n")
+            for r in items:  # 1 列目: 表（メモか出所）、2 列目: 裏（読み取った内容）、3 列目: 出所
+                src = source_label(r.get("source") or {})
+                front = (r.get("note") if exp["card_front"] == "note" and exp["include_notes"] else None) or src
+                back = outfmt.copy_text(r.get("kind"), r.get("latex") or "", {**fmt, "math_copy": fmt["math_copy"] if fmt["math_copy"] != "raw" else "auto"})
+                row = [outfmt.card_cell(front, exp), outfmt.card_cell(back, exp)]
+                if exp["include_source"]:
+                    row.append(outfmt.card_cell(f"{src} / {r.get('created', '')}", exp))
+                w.writerow(row)
+            mime = "text/tab-separated-values" if kind == "tsv" else "text/csv"
+            return buf.getvalue().encode("utf-8"), mime, f"snips-{stamp}.{kind}"
+        md = kind == "md"
+        f = outfmt.md_format(fmt, exp) if md else outfmt.tex_format(fmt)
+        images = exp["include_images"]
+        parts, pics = [], []
+        for r in items:
+            body = r.get("latex") or ""
+            src = source_label(r.get("source") or {})
+            block = []
+            if exp["include_source"]:
+                block.append(f"<!-- {src} / {r.get('created', '')} -->" if md else f"% {src} / {r.get('created', '')}")
+            if exp["include_notes"] and r.get("note"):
+                block.append(r["note"] if md else outfmt.escape_tex_text(r["note"]))
+            if images and (self.root / f"{r['id']}.png").is_file():
+                pics.append(r["id"])
+                block.append(f"![{src}](images/{r['id']}.png)" if md
+                             else f"\\includegraphics[width=0.8\\linewidth]{{images/{r['id']}.png}}")
+            if body:
+                if r.get("kind") in ("mixed", "text"):
+                    block.append(outfmt.convert_text(body, f) if md else outfmt.tex_text(body, fmt))
                 else:
-                    head = f"% {source_label(r.get('source') or {})} / {r.get('created', '')}"
-                    txt = body if r.get("kind") in ("mixed", "text") else (wrap_single(body, "paren") if body else "")
-                    parts.append(head + "\n" + txt)
-            sep = "\n\n"
-            text = sep.join(parts) + "\n"
-            if fmt == "md":
-                return text, "text/markdown", f"snips-{stamp}.md"
-            return text, "application/x-tex", f"snips-{stamp}.tex"
-        raise SnipError("fmt は md / tex / tsv / json のいずれか")
+                    block.append(outfmt.format_math(body, f, "auto" if md else "display"))
+            parts.append("\n\n".join(block))
+        text = "\n\n".join(parts) + "\n"
+        if not md and exp["tex_document"]:
+            text = outfmt.tex_document(text, "Snips", images=bool(pics))
+        name = f"snips-{stamp}.{kind}"
+        if not pics:
+            return text.encode("utf-8"), ("text/markdown" if md else "application/x-tex"), name
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(name, text)
+            for sid in pics:
+                z.write(self.root / f"{sid}.png", f"images/{sid}.png")
+        return buf.getvalue(), "application/zip", f"snips-{stamp}.zip"
 
 
 def source_label(src: dict) -> str:

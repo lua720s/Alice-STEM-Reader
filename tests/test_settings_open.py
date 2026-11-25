@@ -109,9 +109,22 @@ def test_pick_uses_osascript_and_handles_cancel(fx, tmp_path, monkeypatch):
     assert h.pick("folder")["added"] == 1 and "choose folder" in calls[-1][2]
     with pytest.raises(SessionError):
         h.pick("other")
+    # Windows・Linux: OS の選択画面（osutil.pick_paths）を使う
+    from pdf_latex_overlay import osutil
+
     monkeypatch.setattr(hubmod.sys, "platform", "linux")
+    asked = []
+    monkeypatch.setattr(osutil, "pick_paths", lambda kind, prompt: asked.append(kind) or None)
+    assert h.pick("pdf") == {"cancelled": True} and asked == ["files"]
+    monkeypatch.setattr(osutil, "pick_paths", lambda kind, prompt: [str(a)])
+    assert h.pick("pdf")["added"] == 1
+
+    def broken(kind, prompt):
+        raise osutil.OSFeatureError("tkinter がない")
+
+    monkeypatch.setattr(osutil, "pick_paths", broken)
     with pytest.raises(SessionError) as e:
-        h.pick("pdf")
+        h.pick("folder")
     assert e.value.status == 501
     h.close()
 
@@ -119,7 +132,10 @@ def test_pick_uses_osascript_and_handles_cancel(fx, tmp_path, monkeypatch):
 def test_static_ui_has_settings_and_open_buttons():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     js = (STATIC / "app.js").read_text(encoding="utf-8")
-    for ident in ("settings-btn", "settings", "set-single", "set-sample", "tree-open", "empty-open-pdf", "empty-open-folder"):
+    for ident in ("settings-btn", "settings", "fmt-form", "exp-form", "set-sample", "keymap", "tree-open", "empty-open-pdf", "empty-open-folder"):
         assert f'id="{ident}"' in html, ident
-    for token in ("convertDelims", "wrapSingle", "outText", "delim: settings.delim", "/api/pick", "pickOpen"):
+    for tab in ("general", "output", "export", "keys"):  # 設定のタブ
+        assert f'data-stab="{tab}"' in html and f'data-spane="{tab}"' in html
+    assert 'name="open_mode"' in html and "format.js" in html
+    for token in ("FORMAT_UI", "EXPORT_UI", "PF.copyText", "outText", "/api/settings", "/api/pick", "pickOpen"):
         assert token in js, token

@@ -355,3 +355,15 @@ button.danger-solid { background: var(--bad); border-color: var(--bad); color: #
 .kcap.capturing { border-color: var(--accent); color: var(--accent); background: var(--active-bg); }
 .kreset { padding: 1px 6px; font-size: 12px; }
 #sheet { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); padding: 18px 20px; width: min(620px, 94vw); max-height: 88vh; overflow: auto; }
+
+/* ---------- 設定のタブ ---------- */
+.stabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 4px 0 12px; flex-wrap: wrap; }
+.stabs button { border: 0; border-radius: 7px 7px 0 0; background: transparent; padding: 6px 12px; color: var(--muted); }
+.stabs button[aria-selected="true"] { color: var(--accent); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.sform { display: grid; grid-template-columns: minmax(180px, max-content) minmax(0, 1fr); gap: 8px 14px; align-items: center; margin: 8px 0 12px; }
+.sform label.skey { font-size: 13px; }
+.sform select { width: 100%; }
+.sform .scheck { grid-column: 1 / -1; display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+.sform .ssep { grid-column: 1 / -1; font-size: 12px; color: var(--muted); margin-top: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+#settings .dlg-actions { display: flex; align-items: center; }
+#settings .dlg-actions .spacer { flex: 1; }

@@ -69,7 +69,7 @@ def run_recognition(input_path, formulas_path, out_path, backend="unimernet", wo
            "formulas_sha256": safety.sha256_file(formulas_path)}
     state = {"key": key, "done": {}}
     if state_path.exists():
-        old = json.loads(state_path.read_text())
+        old = json.loads(state_path.read_text(encoding="utf-8"))
         if old.get("key") == key:
             state = old
             log(f"再開: 処理済み {len(state['done'])} 件")
@@ -78,7 +78,7 @@ def run_recognition(input_path, formulas_path, out_path, backend="unimernet", wo
 
     def save_state():
         tmp = state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1))
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
         tmp.replace(state_path)
 
     doc = pymupdf.open(inp)

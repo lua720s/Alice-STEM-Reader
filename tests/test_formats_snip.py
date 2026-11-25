@@ -156,24 +156,41 @@ def test_format_for_copy_follows_delimiter_settings():
 
 
 def test_snip_store_history_and_exports(tmp_path):
+    import zipfile
+
+    from pdf_latex_overlay import outfmt
+
     st = snip.SnipStore(tmp_path / "_snips")
     a = st.add(b"png1", {"kind": "math", "latex": "a^2"}, {"type": "screen"}, {"name": "fixed"})
-    b = st.add(b"png2", {"kind": "mixed", "latex": "式 \\(b\\)"}, {"type": "document", "name": "力学.pdf", "page": 2},
+    b = st.add(b"png2", {"kind": "mixed", "latex": "式 \\(b\\) と 50%"}, {"type": "document", "name": "力学.pdf", "page": 2},
                {"name": "fixed"})
     assert [r["id"] for r in st.list()] == [b["id"], a["id"]]  # 新しい順
     assert st.image(a["id"]) == b"png1"
     st.update(a["id"], latex="a^{2}", note="面積")
     md, ctype, name = st.export("md")
-    assert "$a^{2}$" in md and "式 $b$" in md and "力学.pdf p.3" in md and name.endswith(".md")
-    tsv = st.export("tsv")[0].splitlines()
+    md = md.decode()
+    assert "$a^{2}$" in md and "式 $b$" in md and "力学.pdf p.3" in md and name.endswith(".md") and "面積" in md
+    tsv = st.export("tsv")[0].decode().splitlines()
     assert tsv[0].split("\t")[:2] == ["面積", "\\(a^{2}\\)"]
-    tex = st.export("tex", ids=[b["id"]])[0]
-    assert "式 \\(b\\)" in tex and "a^{2}" not in tex
-    assert json.loads(st.export("json")[0])[0]["latex"] == "a^{2}"
+    csvt = st.export("csv", exp={"card_front": "source", "include_source": False})[0].decode().splitlines()
+    assert csvt[0] == "画面,\\(a^{2}\\)"
+    tex = st.export("tex", ids=[b["id"]], exp={"tex_document": True})[0].decode()
+    assert "式 \\(b\\) と 50\\%" in tex and "a^{2}" not in tex and "\\documentclass" in tex and tex.rstrip().endswith("\\end{document}")
+    data, ctype, name = st.export("md", exp={"include_images": True, "include_source": False})
+    assert ctype == "application/zip" and name.endswith(".zip")
+    z = zipfile.ZipFile(io.BytesIO(data))
+    assert sorted(n.split("/")[0] for n in z.namelist()).count("images") == 2
+    assert f"](images/{a['id']}.png)" in z.read([n for n in z.namelist() if n.endswith(".md")][0]).decode()
+    js = json.loads(st.export("json", exp={"include_source": False})[0])
+    assert js[0]["latex"] == "a^{2}" and "source" not in js[0]
+    md2 = st.export("md", fmt={"inline": "paren"}, exp={"md_math": "output"})[0].decode()  # Markdown でも出力の形式に従う
+    assert "式 \\(b\\)" in md2
     st.delete(a["id"])
     assert len(st.list()) == 1 and not (tmp_path / "_snips" / f"{a['id']}.png").exists()
     with pytest.raises(snip.SnipError):
         st.get("../../etc")
+    with pytest.raises(outfmt.FormatError):
+        st.export("md", exp={"include_images": "yes"})
 
 
 def _hub_with_models(tmp_path, answers):
@@ -336,12 +353,20 @@ def test_blank_editor_entries_and_ui_queue_and_settings(tmp_path, monkeypatch):
         assert call("GET", "/api/ui/pull")["commands"] == [{"view": "snips", "new": "latex"}]
         assert call("GET", "/api/ui/pull")["commands"] == []
         s = call("GET", "/api/settings")
-        assert s["global_hotkeys"]["snip"] == "ctrl+cmd+m" and s["global_hotkeys_custom"] == {}  # Mathpix と同じ既定
+        assert s["global_hotkeys"]["snip"] == applaunch.GLOBAL_HOTKEYS["snip"] and s["global_hotkeys_custom"] == {}  # Mathpix と同じ既定
         s = call("POST", "/api/settings", {"global_hotkeys": {"snip": "ctrl+alt+k"}, "delim": "dollar", "single": True})
-        assert s["global_hotkeys"]["snip"] == "ctrl+alt+k" and s["global_hotkeys"]["open"] == "ctrl+cmd+o" and s["delim"] == "dollar"
+        assert s["global_hotkeys"]["snip"] == "ctrl+alt+k" and s["global_hotkeys"]["open"] == applaunch.GLOBAL_HOTKEYS["open"] and s["delim"] == "dollar"
         cfg = applaunch.read_config()
-        assert cfg["global_hotkeys"] == {"snip": "ctrl+alt+k"} and cfg["single"] is True
-        for bad in ({"snip": "m"}, {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+m"}, {"evil": "ctrl+x"}):
+        assert cfg["global_hotkeys"] == {"snip": "ctrl+alt+k"} and cfg["format"]["math_copy"] == "auto"  # 以前の delim・single から
+        s = call("POST", "/api/settings", {"format": {"inline": "dollar", "display": "equation*", "multiline": "aligned"},
+                                           "export": {"snip_format": "tsv", "card_linebreak": "space"}, "open_mode": "browser"})
+        assert s["format"]["display"] == "equation*" and s["format"]["math_copy"] == "raw" and s["export"]["snip_format"] == "tsv"
+        assert s["open_mode"] == "browser" and s["export"]["include_notes"] is True
+        for bad in ({"format": {"inline": "x"}}, {"export": {"nope": 1}}, {"open_mode": "tv"}):
+            with pytest.raises(urllib.error.HTTPError) as ei:
+                call("POST", "/api/settings", bad)
+            assert ei.value.code == 400
+        for bad in ({"snip": "m"}, {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+m"}, {"evil": "ctrl+x"}):  # 1文字だけ・重複・未知
             with pytest.raises(urllib.error.HTTPError) as ei:
                 call("POST", "/api/settings", {"global_hotkeys": bad})
             assert ei.value.code == 400
@@ -380,8 +405,10 @@ def test_global_hotkey_defaults_agree_everywhere():
     root = Path(applaunch.__file__).resolve().parent
     swift = (root / "agent" / "snip_agent.swift").read_text(encoding="utf-8")
     keys = (root / "viewer" / "static" / "keys.js").read_text(encoding="utf-8")
-    assert applaunch.GLOBAL_HOTKEYS == {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+o", "latex": "ctrl+cmd+l", "markdown": "ctrl+cmd+n"}
-    for k, v in applaunch.GLOBAL_HOTKEYS.items():
+    assert applaunch.MAC_HOTKEYS == {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+o", "latex": "ctrl+cmd+l", "markdown": "ctrl+cmd+n"}
+    assert applaunch.PC_HOTKEYS == {k: v.replace("cmd", "alt") for k, v in applaunch.MAC_HOTKEYS.items()}  # Windows・Linux は Ctrl+Alt
+    assert 'IS_MAC ? "Ctrl+Cmd+" : "Ctrl+Alt+"' in keys
+    for k, v in applaunch.MAC_HOTKEYS.items():
         assert f'"{k}": "{v}"' in swift
         letter = v.rsplit("+", 1)[1].upper()
         assert re.search(rf'keys: \[G \+ "{letter}"\][^\n]*hotkey: "{k}"', keys), k

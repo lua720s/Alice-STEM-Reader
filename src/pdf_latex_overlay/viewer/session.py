@@ -524,16 +524,22 @@ class ViewerSession:
         if pid:
             raise SessionError(f"事前処理（pid {pid}）がこの PDF を処理中のため、終わるまで編集できない", 409)
 
-    def export(self, mode: str = "invisible", only_confirmed: bool = False, delim: str = "paren") -> dict:
-        from ..delims import STYLES, convert_delims
+    def export(self, mode: str = "invisible", only_confirmed: bool = False, delim: str | None = "paren", fmt: dict | None = None) -> dict:
+        """派生PDF。文章の枠の中の数式の区切りは、出力の形式の設定（fmt、なければ以前の delim）に合わせる。"""
+        from ..delims import STYLES
+        from ..outfmt import FormatError, clean, convert_text, from_legacy
 
-        if delim not in STYLES:
+        if fmt is None and delim not in STYLES:
             raise SessionError("delim が不正（none / paren / dollar）")
+        try:
+            fmt = clean("format", fmt) if fmt is not None else from_legacy(delim)
+        except FormatError as e:
+            raise SessionError(str(e))
         with self.lock:
             snapshot = FormulaSet.from_dict(self.fs.to_dict())
-        for f in snapshot.formulas:  # 文章の中の数式の区切りを、画面の設定に合わせる（数式だけの枠は、そのまま）
+        for f in snapshot.formulas:  # 文章の中の数式の区切りを、設定に合わせる（数式だけの枠は、そのまま）
             if f.kind == "text" and f.latex:
-                f.latex = convert_delims(f.latex, delim)
+                f.latex = convert_text(f.latex, {**fmt, "text_lines": "keep"})
         stamp = time.strftime("%Y%m%d-%H%M%S")
         out = self.workdir / "exports" / f"{self.source.stem}.latex-{stamp}.pdf"
         n = 1
@@ -552,45 +558,61 @@ class ViewerSession:
             "failed_checks": [k for k, v in rep.checks.items() if isinstance(v, dict) and v.get("ok") is False],
         }
 
-    def export_text(self, fmt: str = "md", only_confirmed: bool = False) -> tuple[str, str, str]:
+    def export_text(self, fmt: str = "md", only_confirmed: bool = False, out_fmt: dict | None = None,
+                    exp: dict | None = None) -> tuple[str, str, str]:
         """認識した文章と数式を、ページごとに読む順（上から下、左から右）に並べた原稿。(本文, MIME, ファイル名)。
 
-        fmt: md（数式は $…$・$$…$$）/ tex（\\( … \\)・\\[ … \\]）。メモ（PDF 全体・ページ）も入れる。除外した枠は入れない。
+        fmt: md / tex。out_fmt（出力の形式）・exp（書き出しの設定）は outfmt の設定。メモ（資料全体・ページ）も入れる（設定で外せる）。
+        除外した枠は入れない。tex で exp["tex_document"] なら、そのままコンパイルできる文書にする。
         """
-        from ..delims import convert_delims, wrap_single
+        from .. import outfmt
 
         if fmt not in ("md", "tex"):
             raise SessionError("fmt は md か tex")
-        style = "dollar" if fmt == "md" else "paren"
-        notes = self.notes_get()
+        try:
+            of = outfmt.clean("format", out_fmt)
+            ex = outfmt.clean("export", exp)
+        except outfmt.FormatError as e:
+            raise SessionError(str(e))
+        md = fmt == "md"
+        mf = outfmt.md_format(of, ex)
+        notes = self.notes_get() if ex["include_notes"] else {"doc": "", "pages": {}}
         with self.lock:
-            items = [f for f in self.fs.formulas if f.latex and f.status != "excluded" and (f.status == "confirmed" or not only_confirmed)]
+            items = [f for f in self.fs.formulas if f.latex and f.status != "excluded" and (f.status == "confirmed" or not only_confirmed)
+                     and (ex["doc_include_text"] or f.kind != "text")]
             views = {f.id: self._view(f).get("view_rect") or list(f.rect) for f in items}
         out = []
         title = self.source.stem
-        if fmt == "md":
-            out.append(f"# {title}\n\n<!-- Alice STEM Reader: {self.source.name} / sha256 {self.input_sha[:16]} -->")
+        stamp_note = f"Alice STEM Reader: {self.source.name} / sha256 {self.input_sha[:16]}"
+        if md:
+            out.append(f"# {title}" + (f"\n\n<!-- {stamp_note} -->" if ex["include_source"] else ""))
         else:
-            out.append(f"% Alice STEM Reader: {self.source.name} / sha256 {self.input_sha[:16]}\n\\section*{{{title}}}")
+            if ex["include_source"]:
+                out.append(f"% {stamp_note}")
+            if not ex["tex_document"]:
+                out.append(f"\\section*{{{outfmt.escape_tex_text(title)}}}")
         if notes.get("doc", "").strip():
-            out.append(notes["doc"].strip())
+            out.append(notes["doc"].strip() if md else outfmt.escape_tex_text(notes["doc"].strip()))
         for pno in range(self.doc.page_count):
             page_items = sorted((f for f in items if f.page == pno), key=lambda f: (round(views[f.id][1] / 6), views[f.id][0]))
             pnote = notes.get("pages", {}).get(str(pno), "").strip()
             if not page_items and not pnote:
                 continue
-            out.append(f"<!-- p.{pno + 1} -->" if fmt == "md" else f"% p.{pno + 1}")
+            if ex["doc_page_markers"]:
+                out.append(f"<!-- p.{pno + 1} -->" if md else f"% p.{pno + 1}")
             if pnote:
-                out.append(("> " + pnote.replace("\n", "\n> ")) if fmt == "md" else "% " + pnote.replace("\n", "\n% "))
+                out.append(("> " + pnote.replace("\n", "\n> ")) if md else "% " + pnote.replace("\n", "\n% "))
             for f in page_items:
                 body = f.latex.strip()
                 if f.kind == "text":
-                    out.append(convert_delims(body, style))
+                    out.append(outfmt.convert_text(body, mf) if md else outfmt.tex_text(body, of))
                 else:  # 数式だけの枠: 1行は行内、複数行は表示数式
-                    out.append(wrap_single(body, style))
+                    out.append(outfmt.format_math(body, mf if md else outfmt.tex_format(of), "auto"))
         text = "\n\n".join(out) + "\n"
+        if not md and ex["tex_document"]:
+            text = outfmt.tex_document(text, title)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        if fmt == "md":
+        if md:
             return text, "text/markdown", f"{self.source.stem}-{stamp}.md"
         return text, "application/x-tex", f"{self.source.stem}-{stamp}.tex"
 

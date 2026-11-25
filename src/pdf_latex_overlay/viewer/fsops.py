@@ -54,8 +54,13 @@ def move_to_trash(path: Path, trash_dir: Path | None = None) -> Path:
     trash_dir を渡すと、そこへ移す（試験用）。
     """
     path = Path(path)
-    if trash_dir is None and sys.platform != "darwin":
-        raise SessionError("このOSではゴミ箱に移せない（未対応）", 501)
+    if trash_dir is None and sys.platform != "darwin":  # Windows のごみ箱・Linux の Trash（FreeDesktop の仕様）
+        from ..osutil import OSFeatureError, move_to_trash_native
+
+        try:
+            return move_to_trash_native(path) or path
+        except (OSFeatureError, OSError) as e:
+            raise SessionError(f"ゴミ箱に移せなかった: {e}", 500) from e
     td = Path(trash_dir) if trash_dir is not None else Path.home() / ".Trash"
     if trash_dir is not None:
         td.mkdir(parents=True, exist_ok=True)

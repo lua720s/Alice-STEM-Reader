@@ -9,6 +9,7 @@
 | 2c | Implement both embedding methods with known LaTeX, compare copying and structure preservation, choose the default | `feat: compare invisible text and ActualText embedding` |
 | 2d | End-to-end CLI tests; failure, interruption and resume tests; example of calling from another application | `feat: add verified PDF processing CLI` |
 | 3 | Non-PDF documents (EPUB, DjVu, images, Markdown, LaTeX), Snip (screen, page region, images, handwriting), Snip dashboard, Mathpix-style customizable shortcuts, menu bar agent | `feat: multi-format documents, Snip OCR, launcher apps` |
+| 4 | Windows and Linux support (launchers, screen capture, global shortcuts), app-window mode, output-format and export settings, CI on three OSes | `feat: Windows and Linux support, app window, output and export settings` |
 
 Commit locally at each step after reviewing the diff and the relevant tests. If tests fail, report the state and do not create a commit that claims success. Sensitive data, generated PDFs, logs and model weights stay out of Git; the generation procedure and expected values of the synthetic samples are tracked.
 

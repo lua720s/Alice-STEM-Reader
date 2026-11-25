@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 
 import pymupdf
+import sys
+
 import pytest
 
 from pdf_latex_overlay import prepare, safety
@@ -273,6 +275,7 @@ def test_operations_are_logged(hub, shelf, tmp_path):
     assert [x["action"] for x in log] == ["mkdir", "move", "trash"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="シンボリックリンク（Windows では管理者権限が要る）")
 def test_symlinked_folders_and_files_are_not_reachable(shelf, tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()

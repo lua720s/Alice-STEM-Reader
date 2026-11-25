@@ -80,7 +80,7 @@ def cmd_viewer(a) -> int:
     return serve(a.paths, formulas_path=a.formulas, port=a.port, open_browser=not a.no_open,
                  backend=a.backend, workdir=a.workdir, auto=a.auto, readonly=a.readonly, verify=a.verify,
                  allow_external=a.allow_external, state_file=a.state_file, idle_exit_min=a.idle_exit,
-                 roots_file=a.roots_file)
+                 roots_file=a.roots_file, open_in=a.open_in)
 
 
 def cmd_app_open(a) -> int:
@@ -95,7 +95,7 @@ def cmd_app_open(a) -> int:
         if not st:
             return 1
         if st.get("idle_s", 999) > 8:
-            applaunch.webbrowser.open(st["url"])
+            applaunch.open_ui(st["url"])
         return 0
     if a.hook:
         applaunch.run_hook("on-launch")  # 利用者が置いたフック（なければ何もしない）
@@ -103,8 +103,14 @@ def cmd_app_open(a) -> int:
     files = [p for p in a.paths if not Path(p).expanduser().is_dir()]
     dirs = [p for p in a.paths if Path(p).expanduser().is_dir()]
     try:
+        opener = None
+        if a.open_in == "browser":
+            opener = applaunch.webbrowser.open
+        elif a.open_in == "app":
+            opener = lambda u: (applaunch.osutil.open_app_window(u, applaunch.support_dir() / "window-profile")  # noqa: E731
+                                or applaunch.webbrowser.open(u))
         res = applaunch.app_open(files=files, folder=a.folder or (dirs[0] if dirs else None), backend=a.backend,
-                                 view=a.view, new=a.new)
+                                 view=a.view, new=a.new, opener=opener)
     except (ValueError, RuntimeError) as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -120,19 +126,18 @@ def cmd_app_stop(a) -> int:
 
 
 def cmd_build_app(a) -> int:
-    from .appbuild import build_app, build_snip_app
+    from .appbuild import build_launchers
 
     try:
-        app = build_app(a.dest, register=not a.no_register)
-        if not a.no_snip:
-            print(f"作成した: {build_snip_app(a.dest, register=not a.no_register)}")
+        made = build_launchers(a.dest, register=not a.no_register, snip=not a.no_snip, start_at_login=a.start_at_login)
     except (RuntimeError, OSError) as e:
         print(str(e), file=sys.stderr)
         return 2
     except Exception as e:  # subprocess.CalledProcessError など
         print(f"作成に失敗: {e}\n{getattr(e, 'stderr', '')}", file=sys.stderr)
         return 2
-    print(f"作成した: {app}")
+    for m in made:
+        print(f"created: {m}")
     return 0
 
 
@@ -394,6 +399,35 @@ def cmd_app_snip(a) -> int:
     return 0 if r.get("cancelled") or r.get("latex") else 5
 
 
+def cmd_window(a) -> int:
+    """pywebview（pip install pywebview）で、画面をアプリのウィンドウとして開く。"""
+    try:
+        import webview  # type: ignore
+    except ImportError:
+        print("pywebview が入っていない（pip install pywebview）", file=sys.stderr)
+        return 2
+    try:
+        webview.settings["ALLOW_DOWNLOADS"] = True  # 書き出し（Markdown・TSV など）を保存できるように
+    except Exception:
+        pass
+    webview.create_window("Alice STEM Reader", a.url, width=a.width, height=a.height, min_size=(900, 600))
+    webview.start()
+    return 0
+
+
+def cmd_hotkey_agent(a) -> int:
+    """（Windows・Linux）全体のショートカットを受け付けて常駐する。macOS はメニューバーの Snip アプリが受け持つ。"""
+    from .hotkeys import run_agent
+
+    return run_agent(once=a.check)
+
+
+def cmd_setup_models(a) -> int:
+    from .setup_models import main as setup_main
+
+    return setup_main(tiny=a.tiny, paddle=not a.no_paddle)
+
+
 def cmd_library(a) -> int:
     from .prepare import list_library
 
@@ -438,6 +472,8 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--backend", default="none", help="recognition engine (none / unimernet[=base] / unimernet_tiny / ppformulanet / mathpix); can also be switched in the viewer")
     v.add_argument("--allow-external", action="store_true", help="consent to sending images to an external service such as Mathpix (required for --backend mathpix)")
     v.add_argument("--no-open", action="store_true")
+    v.add_argument("--open-in", choices=["app", "browser"], default=None,
+                   help="open the UI in an app window (Chrome/Edge --app or pywebview) or the default browser (default: the app setting)")
     v.add_argument("--roots-file", default=None, help="file that remembers folders added from the viewer (used by the app)")
     v.add_argument("--state-file", default=None, help="file to write connection info (port, token) to (used by the app)")
     v.add_argument("--idle-exit", type=float, default=None, metavar="MIN", help="exit after this many minutes without requests from the browser (used by the app)")
@@ -454,14 +490,17 @@ def build_parser() -> argparse.ArgumentParser:
     ao.add_argument("--backend", default="unimernet")
     ao.add_argument("--if-running", action="store_true", help="if running, open the browser and exit 0; otherwise exit 1")
     ao.add_argument("--print-last", action="store_true", help="print the folder opened last time")
+    ao.add_argument("--open-in", choices=["app", "browser"], default=None, help="override the open_mode setting")
     ao.add_argument("--view", choices=["reader", "snips", "settings"], default=None, help="screen to show (reader, Snip dashboard, settings)")
     ao.add_argument("--new", choices=["latex", "markdown"], default=None, help="open the Snip dashboard with a new blank entry")
     ao.add_argument("--hook", action="store_true", help="run the launch hook (hooks/on-launch) if present, and start the menu bar Snip agent")
     ao.set_defaults(func=cmd_app_open)
     ast = sub.add_parser("app-stop", help="(used by the app) stop the running viewer")
     ast.set_defaults(func=cmd_app_stop)
-    ba = sub.add_parser("build-app", help="build the macOS apps (Alice STEM Reader and the Alice STEM Snip menu bar app) for Launchpad and Spotlight")
-    ba.add_argument("--dest", default="~/Applications", help="destination folder (default: ~/Applications)")
+    ba = sub.add_parser("build-app", help="create launchers: macOS apps (Launchpad/Spotlight), Windows Start menu + Send to, Linux .desktop entries")
+    ba.add_argument("--dest", default=None, help="(macOS) destination folder (default: ~/Applications)")
+    ba.add_argument("--start-at-login", action="store_true",
+                    help="(Windows/Linux) start the global-shortcut agent at login (macOS: use the menu bar app's menu)")
     ba.add_argument("--no-register", action="store_true", help="do not register with LaunchServices")
     ba.add_argument("--no-snip", action="store_true", help="do not build Alice STEM Snip.app")
     ba.set_defaults(func=cmd_build_app)
@@ -537,6 +576,21 @@ def build_parser() -> argparse.ArgumentParser:
     asn.add_argument("--mode", choices=["auto", "math", "text"], default="auto")
     asn.add_argument("--backend", default="unimernet")
     asn.set_defaults(func=cmd_app_snip)
+
+    wn = sub.add_parser("window", help="open the UI in a native window with pywebview (used by the app)")
+    wn.add_argument("url")
+    wn.add_argument("--width", type=int, default=1440)
+    wn.add_argument("--height", type=int, default=920)
+    wn.set_defaults(func=cmd_window)
+
+    hk = sub.add_parser("hotkey-agent", help="(Windows/Linux) run in the background and handle the global shortcuts")
+    hk.add_argument("--check", action="store_true", help="register the shortcuts, report the result and exit")
+    hk.set_defaults(func=cmd_hotkey_agent)
+
+    sm = sub.add_parser("setup-models", help="install the recognition models into this project (SHA-256 verified; all platforms)")
+    sm.add_argument("--tiny", action="store_true", help="also install UniMERNet tiny")
+    sm.add_argument("--no-paddle", action="store_true", help="skip PaddleOCR (text recognition)")
+    sm.set_defaults(func=cmd_setup_models)
 
     vd = sub.add_parser("verify-derived", help="compare a derived PDF's appearance and page attributes with the original")
     vd.add_argument("original")

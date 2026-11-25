@@ -418,6 +418,12 @@ def _latex(src: Path) -> tuple[bytes, dict]:
     return html_to_pdf(body), {"method": "latex:source", "compile_error": reason}
 
 
+def _screen_capture():
+    from .osutil import screen_capture_available
+
+    return screen_capture_available()
+
+
 CONVERTERS = {"ebook": _ebook, "image": _image, "djvu": _djvu, "markdown": _markdown, "latex": _latex, "text": _text}
 
 
@@ -434,7 +440,8 @@ def describe_support() -> dict:
         "djvu": bool(shutil.which("ddjvu")),
         "tex_engines": tex_engines() + (["uplatex"] if shutil.which("uplatex") and shutil.which("dvipdfmx") else []),
         "heic": heic,
-        "screen_capture": sys.platform == "darwin" and bool(shutil.which("screencapture")),
+        "screen_capture": _screen_capture(),
+        "platform": sys.platform,
     }
 
 

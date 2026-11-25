@@ -28,7 +28,7 @@ from .hub import Hub
 from .session import SessionError, ViewerSession, valid_id
 
 STATIC = Path(__file__).resolve().parent / "static"
-STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js", "i18n.js", "icon.svg", "keys.js", "dashboard.js",
+STATIC_FILES = {"index.html", "app.js", "style.css", "theme.js", "i18n.js", "icon.svg", "keys.js", "dashboard.js", "format.js",
                 "vendor/katex/katex.min.js", "vendor/katex/katex.min.css"}
 _VENDOR_FONT = re.compile(r"^vendor/katex/fonts/KaTeX_[A-Za-z0-9_-]+\.woff2$")
 
@@ -174,7 +174,7 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "POST" and path == "/api/snip/screen":
                     b = self._body()
                     return self._json(200, hub.snip_screen(mode=b.get("mode", "auto"), copy=b.get("copy") is not False,
-                                                           delim=b.get("delim", "paren"), single=b.get("single") is True))
+                                                           fmt=_settings()[0]))
                 if method == "POST" and path == "/api/snips/new":
                     b = self._body()
                     return self._json(200, hub.snips().new_entry(b.get("format", "latex")))
@@ -183,33 +183,39 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                 if method == "GET" and path == "/api/ui/pull":
                     return self._json(200, {"commands": hub.ui_pull()})
                 if method == "GET" and path == "/api/settings":
-                    from .. import applaunch
-
-                    cfg = applaunch.read_config()
-                    return self._json(200, {"global_hotkeys": applaunch.global_hotkeys(), "defaults": applaunch.GLOBAL_HOTKEYS,
-                                            "global_hotkeys_custom": cfg.get("global_hotkeys") or {},
-                                            "delim": cfg.get("delim", "paren"), "single": bool(cfg.get("single", False))})
+                    return self._json(200, _settings_json())
                 if method == "POST" and path == "/api/settings":
-                    from .. import applaunch
+                    from .. import applaunch, outfmt
                     from ..delims import STYLES
 
                     b = self._body()
                     upd = {}
-                    if "global_hotkeys" in b:
-                        upd["global_hotkeys"] = applaunch.clean_hotkeys(b["global_hotkeys"])
-                    if "delim" in b:
+                    try:
+                        if "global_hotkeys" in b:
+                            upd["global_hotkeys"] = applaunch.clean_hotkeys(b["global_hotkeys"])
+                        if "format" in b:
+                            upd["format"] = outfmt.clean("format", b["format"])
+                        if "export" in b:
+                            upd["export"] = outfmt.clean("export", b["export"])
+                    except outfmt.FormatError as e:
+                        raise SessionError(str(e))
+                    if "open_mode" in b:
+                        if b["open_mode"] not in ("app", "browser"):
+                            raise SessionError("open_mode は app か browser")
+                        upd["open_mode"] = b["open_mode"]
+                    if "delim" in b:  # 以前の画面との互換
                         if b["delim"] not in STYLES:
                             raise SessionError("delim が不正")
-                        upd["delim"] = b["delim"]
-                    if "single" in b:
-                        upd["single"] = b["single"] is True
-                    cfg = applaunch.write_config(upd) if upd else applaunch.read_config()
-                    return self._json(200, {"global_hotkeys": applaunch.global_hotkeys(), "delim": cfg.get("delim", "paren"),
-                                            "single": bool(cfg.get("single", False))})
+                        upd["format"] = outfmt.from_legacy(b["delim"], b.get("single") is True)
+                    if upd:
+                        applaunch.write_config(upd)
+                    return self._json(200, _settings_json())
                 if method == "POST" and path == "/api/snips/export":
                     b = self._body()
-                    text, ctype, fname = hub.snips().export(b.get("fmt"), b.get("ids"), delim=b.get("delim", "paren"))
-                    return self._send(200, text.encode("utf-8"), ctype + "; charset=utf-8",
+                    fmt, exp = _settings()
+                    data, ctype, fname = hub.snips().export(b.get("fmt") or exp["snip_format"], b.get("ids"), fmt=fmt,
+                                                            exp={**exp, **(b.get("export") or {})})
+                    return self._send(200, data, ctype + ("" if ctype == "application/zip" else "; charset=utf-8"),
                                       {"Content-Disposition": f'attachment; filename="{fname}"'})
                 m = re.fullmatch(r"/api/snips/([A-Za-z0-9-]+)(\.png)?", path)
                 if m and method == "GET" and m.group(2):
@@ -276,7 +282,9 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                     return self._json(200, session.delete(m.group(1)))
                 if method == "POST" and path == "/api/export/text":
                     b = self._body()
-                    text, ctype, fname = session.export_text(b.get("fmt", "md"), only_confirmed=bool(b.get("only_confirmed")))
+                    fmt, exp = _settings()
+                    text, ctype, fname = session.export_text(b.get("fmt", "md"), only_confirmed=bool(b.get("only_confirmed")),
+                                                             out_fmt=fmt, exp=exp)
                     from urllib.parse import quote
 
                     return self._send(200, text.encode("utf-8"), ctype + "; charset=utf-8",
@@ -287,7 +295,7 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
                     if mode not in ("invisible", "actualtext"):
                         raise SessionError("mode が不正")
                     return self._json(200, session.export(mode=mode, only_confirmed=bool(b.get("only_confirmed")),
-                                                          delim=b.get("delim", "paren")))
+                                                          fmt=_settings()[0]))
                 return self._json(404, {"error": "not found"})
             except SessionError as e:
                 return self._json(e.status, {"error": str(e)})
@@ -314,6 +322,26 @@ def make_handler(hub: Hub, token: str, port_ref: dict):
             self._dispatch("DELETE")
 
     return Handler
+
+
+def _settings() -> tuple[dict, dict]:
+    """出力の形式と書き出しの設定（app.json。メニューバー・常駐のショートカットからの Snip とも共通）。"""
+    from .. import applaunch, outfmt
+
+    return outfmt.settings_from_config(applaunch.read_config())
+
+
+def _settings_json() -> dict:
+    from .. import applaunch, outfmt
+
+    cfg = applaunch.read_config()
+    fmt, exp = outfmt.settings_from_config(cfg)
+    return {"global_hotkeys": applaunch.global_hotkeys(), "defaults": applaunch.GLOBAL_HOTKEYS,
+            "global_hotkeys_custom": cfg.get("global_hotkeys") or {}, "format": fmt, "export": exp,
+            "format_defaults": outfmt.FORMAT_DEFAULTS, "export_defaults": outfmt.EXPORT_DEFAULTS,
+            "open_mode": cfg.get("open_mode", "app"), "platform": sys.platform,
+            "delim": {"paren": "paren", "dollar": "dollar", "none": "none"}.get(fmt["inline"], "paren"),
+            "single": fmt["math_copy"] != "raw"}
 
 
 def default_workdir(input_path) -> Path:
@@ -343,7 +371,7 @@ def make_server(target, port: int = 0):
 
 def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", workdir=None, auto=False,
           readonly=False, verify=False, allow_external=False, state_file=None, idle_exit_min=None,
-          roots_file=None) -> int:
+          roots_file=None, open_in: str | None = None) -> int:
     """paths は PDF またはフォルダ（複数可）。フォルダなら左のコレクションに階層で並ぶ。"""
     paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
     if roots_file:  # 前に画面から追加したフォルダも、並べる
@@ -379,7 +407,18 @@ def serve(paths, formulas_path=None, port=0, open_browser=True, backend="none", 
     where = hub.session.workdir if hub.session else library_root()
     print(f"ビューア: {url}\n作業領域: {where}\n終了は Ctrl+C", flush=True)
     if open_browser:
-        webbrowser.open(url)
+        if open_in == "browser":
+            webbrowser.open(url)
+        elif open_in == "app":
+            from .. import applaunch, osutil
+
+            if not osutil.open_app_window(url, applaunch.support_dir() / "window-profile"):
+                print("アプリのウィンドウを開けなかったので、ブラウザで開きます（Chrome・Edge か pywebview が必要）", file=sys.stderr)
+                webbrowser.open(url)
+        else:
+            from ..applaunch import open_ui
+
+            open_ui(url)  # 設定（open_mode）に従う
     if state_file:  # アプリ（.app）から再利用するための、接続情報。自分だけが読める
         _write_state(Path(state_file), {"pid": os.getpid(), "port": httpd.server_address[1], "token": token, "url": url})
     if idle_exit_min:  # 画面からの通信が一定時間なければ終了する（ブラウザを閉じたまま残らないように）

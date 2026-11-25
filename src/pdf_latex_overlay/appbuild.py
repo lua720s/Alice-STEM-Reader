@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import plistlib
 import shutil
 import subprocess
@@ -229,3 +230,125 @@ def _remember_snip_app(app: Path):
     from .applaunch import write_config
 
     write_config({"snip_app": str(app)})
+
+
+# ---------------------------------------------------------------- Windows・Linux のランチャー
+DESKTOP_MIME = ["application/pdf", "application/epub+zip", "application/x-mobipocket-ebook", "application/x-fictionbook+xml",
+                "application/oxps", "application/vnd.ms-xpsdocument", "application/vnd.comicbook+zip", "image/vnd.djvu",
+                "image/x-djvu", "image/png", "image/jpeg", "image/tiff", "image/webp", "image/heic", "image/bmp", "image/gif",
+                "text/markdown", "text/x-tex", "text/x-latex", "text/plain"]
+
+
+def _desktop_quote(s: str) -> str:
+    """.desktop の Exec の引数（空白などを含むときは二重引用符で囲む。仕様の予約文字はエスケープする）。"""
+    if not any(c in s for c in ' \t\n"\'\\><~|&;$*?#()`'):
+        return s
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`").replace("$", "\\$") + '"'
+
+
+def desktop_entry(name: str, comment: str, exec_args: list[str], icon: str, mime: bool = False,
+                  actions: list[tuple[str, str, list[str]]] = ()) -> str:
+    lines = ["[Desktop Entry]", "Type=Application", f"Name={name}", f"Comment={comment}",
+             "Exec=" + " ".join(_desktop_quote(a) for a in exec_args) + (" %F" if mime else ""),
+             f"Icon={icon}", "Terminal=false", "StartupNotify=true", "Categories=Education;Science;Office;Viewer;"]
+    if mime:
+        lines.append("MimeType=" + ";".join(DESKTOP_MIME) + ";")
+    if actions:
+        lines.append("Actions=" + ";".join(a[0] for a in actions) + ";")
+    for key, label, args in actions:
+        lines += ["", f"[Desktop Action {key}]", f"Name={label}", "Exec=" + " ".join(_desktop_quote(a) for a in args)]
+    return "\n".join(lines) + "\n"
+
+
+def build_linux(python: str | None = None, start_at_login: bool = False, register: bool = True,
+                home: Path | None = None) -> list[Path]:
+    """~/.local/share/applications に .desktop を置く（アプリの一覧・ランチャーから開ける。資料の「別のアプリで開く」にも出る）。"""
+    home = home or Path.home()
+    py = python or sys.executable
+    data = home / ".local" / "share"
+    apps = data / "applications"
+    apps.mkdir(parents=True, exist_ok=True)
+    icon_dir = data / "icons" / "hicolor" / "256x256" / "apps"
+    icon_dir.mkdir(parents=True, exist_ok=True)
+    icon = icon_dir / "alice-stem-reader.png"
+    from PIL import Image
+
+    Image.open(ICON_PNG).resize((256, 256), Image.LANCZOS).save(icon)
+    base = [py, "-m", "pdf_latex_overlay"]
+    out = []
+    reader = apps / "alice-stem-reader.desktop"
+    reader.write_text(desktop_entry(APP_NAME, "Read documents and snip formulas and text to LaTeX / Markdown", base + ["app-open", "--hook"],
+                                    str(icon), mime=True,
+                                    actions=[("snip", "Snip Screen", base + ["app-snip"]),
+                                             ("dashboard", "Snip Dashboard", base + ["app-open", "--view", "snips"]),
+                                             ("latex", "New Snip (LaTeX)", base + ["app-open", "--new", "latex"]),
+                                             ("markdown", "New Snip (Markdown)", base + ["app-open", "--new", "markdown"])]),
+                      encoding="utf-8")
+    snip = apps / "alice-stem-snip.desktop"
+    snip.write_text(desktop_entry(SNIP_APP_NAME, "Snip a region of the screen to LaTeX (result is copied)", base + ["app-snip"], str(icon)),
+                    encoding="utf-8")
+    out += [reader, snip]
+    auto = home / ".config" / "autostart" / "alice-stem-hotkeys.desktop"
+    if start_at_login:
+        auto.parent.mkdir(parents=True, exist_ok=True)
+        auto.write_text(desktop_entry("Alice STEM Snip shortcuts", "Global shortcuts for Alice STEM Snip", base + ["hotkey-agent"], str(icon))
+                        + "X-GNOME-Autostart-enabled=true\nNoDisplay=true\n", encoding="utf-8")
+        out.append(auto)
+    for p in out:
+        p.chmod(0o755)
+    if register and shutil.which("update-desktop-database"):
+        subprocess.run(["update-desktop-database", str(apps)], capture_output=True)
+    return out
+
+
+PS_SHORTCUT = ("param($path,$target,$arguments,$icon,$workdir,$desc) $s=(New-Object -ComObject WScript.Shell).CreateShortcut($path);"
+               "$s.TargetPath=$target; $s.Arguments=$arguments; $s.IconLocation=$icon; $s.WorkingDirectory=$workdir;"
+               "$s.Description=$desc; $s.Save()")
+
+
+def _win_args(args: list[str]) -> str:
+    return subprocess.list2cmdline(args)
+
+
+def build_windows(python: str | None = None, start_at_login: bool = False, register: bool = True) -> list[Path]:
+    """スタートメニュー（検索・ピン留めから開ける）と「送る」に、ショートカット（.lnk）を作る。"""
+    from PIL import Image
+
+    from . import osutil
+    from .applaunch import support_dir
+
+    py = str(osutil.gui_python(python))
+    appdata = Path(os.environ["APPDATA"])
+    programs = appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+    sendto = appdata / "Microsoft" / "Windows" / "SendTo"
+    startup = programs / "Startup"
+    ico = support_dir() / "alice-stem-reader.ico"
+    ico.parent.mkdir(parents=True, exist_ok=True)
+    Image.open(ICON_PNG).save(ico, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    base = ["-m", "pdf_latex_overlay"]
+    plan = [(programs / f"{APP_NAME}.lnk", base + ["app-open", "--hook"], "Read documents and snip formulas to LaTeX"),
+            (programs / f"{SNIP_APP_NAME}.lnk", base + ["app-snip"], "Snip a region of the screen to LaTeX"),
+            (sendto / f"{APP_NAME}.lnk", base + ["app-open", "--hook"], "Open in Alice STEM Reader")]
+    if start_at_login:
+        plan.append((startup / "Alice STEM Snip shortcuts.lnk", base + ["hotkey-agent"], "Global shortcuts for Alice STEM Snip"))
+    out = []
+    for path, args, desc in plan:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"& {{{PS_SHORTCUT}}}",
+                        str(path), py, _win_args(args), f"{ico},0", str(Path.home()), desc],
+                       check=True, capture_output=True, text=True, **osutil.no_window())
+        out.append(path)
+    return out
+
+
+def build_launchers(dest_dir=None, python: str | None = None, register: bool = True, snip: bool = True,
+                    start_at_login: bool = False) -> list[Path]:
+    """この OS のランチャーを作る（macOS: .app 2 つ、Windows: スタートメニュー・送る、Linux: .desktop）。"""
+    if sys.platform == "darwin":
+        out = [build_app(dest_dir or "~/Applications", python=python, register=register)]
+        if snip:
+            out.append(build_snip_app(dest_dir or "~/Applications", python=python, register=register))
+        return out
+    if sys.platform == "win32":
+        return build_windows(python=python, start_at_login=start_at_login, register=register)
+    return build_linux(python=python, start_at_login=start_at_login, register=register)

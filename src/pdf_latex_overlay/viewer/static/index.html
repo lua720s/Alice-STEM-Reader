@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
 <script defer src="vendor/katex/katex.min.js"></script>
 <script defer src="i18n.js"></script>
+<script defer src="format.js"></script>
 <script defer src="keys.js"></script>
 <script defer src="app.js"></script>
 <script defer src="dashboard.js"></script>
@@ -296,23 +297,36 @@
 <dialog id="settings" aria-labelledby="settings-title">
   <form method="dialog" id="settings-form">
     <h2 id="settings-title" data-i18n="設定">設定</h2>
-    <fieldset>
-      <legend data-i18n="数式の区切り記号">数式の区切り記号</legend>
-      <p class="muted" data-i18n="コピーする文字列と、PDFに埋め込む文章の中の数式に、区切りを付けるかどうか、どの書き方にするかを選びます。">コピーする文字列と、PDFに埋め込む文章の中の数式に、区切りを付けるかどうか、どの書き方にするかを選びます。</p>
-      <label class="radio"><input type="radio" name="delim" value="paren"> <code>\( … \)</code>・<code>\[ … \]</code></label>
-      <label class="radio"><input type="radio" name="delim" value="dollar"> <code>$ … $</code>・<code>$$ … $$</code></label>
-      <label class="radio"><input type="radio" name="delim" value="none"> <span data-i18n="付けない（区切りなし）">付けない（区切りなし）</span></label>
-      <label class="radio check"><input type="checkbox" id="set-single"> <span data-i18n="数式だけの枠のコピーにも、区切りを付ける">数式だけの枠のコピーにも、区切りを付ける</span></label>
+    <div class="stabs" role="tablist" aria-label="設定" data-i18n-label="設定">
+      <button type="button" role="tab" data-stab="general" aria-selected="true" data-i18n="全般">全般</button>
+      <button type="button" role="tab" data-stab="output" aria-selected="false" data-i18n="出力の形式">出力の形式</button>
+      <button type="button" role="tab" data-stab="export" aria-selected="false" data-i18n="書き出し">書き出し</button>
+      <button type="button" role="tab" data-stab="keys" aria-selected="false" data-i18n="キーボードショートカット">キーボードショートカット</button>
+    </div>
+    <section data-spane="general" role="tabpanel">
+      <fieldset>
+        <legend data-i18n="画面の開き方">画面の開き方</legend>
+        <label class="radio"><input type="radio" name="open_mode" value="app"> <span data-i18n="アプリのウィンドウ（アドレスバーのない専用の窓）">アプリのウィンドウ（アドレスバーのない専用の窓）</span></label>
+        <label class="radio"><input type="radio" name="open_mode" value="browser"> <span data-i18n="いつものブラウザのタブ">いつものブラウザのタブ</span></label>
+        <p class="muted small" data-i18n="アプリのウィンドウには、Chrome・Edge・Brave などか、pywebview（pip install pywebview）が必要です。なければブラウザで開きます。次にアプリを開いたときから反映されます。">アプリのウィンドウには、Chrome・Edge・Brave などか、pywebview（pip install pywebview）が必要です。なければブラウザで開きます。次にアプリを開いたときから反映されます。</p>
+      </fieldset>
+    </section>
+    <section data-spane="output" role="tabpanel" hidden>
+      <p class="muted" data-i18n="コピー・Snip（メニューバーやショートカットからも）・PDFに埋め込む文章に使う書き方です。">コピー・Snip（メニューバーやショートカットからも）・PDFに埋め込む文章に使う書き方です。</p>
+      <div id="fmt-form" class="sform"></div>
       <div class="muted" data-i18n="例">例</div>
       <pre id="set-sample" aria-live="polite"></pre>
-    </fieldset>
-    <fieldset>
-      <legend data-i18n="キーボードショートカット">キーボードショートカット</legend>
+    </section>
+    <section data-spane="export" role="tabpanel" hidden>
+      <p class="muted" data-i18n="Snip の書き出しと、資料の「認識した内容を書き出す」に使います。">Snip の書き出しと、資料の「認識した内容を書き出す」に使います。</p>
+      <div id="exp-form" class="sform"></div>
+    </section>
+    <section data-spane="keys" role="tabpanel" hidden>
       <p class="muted" data-i18n="既定は Mathpix Snip と同じです。ボタンを押してから、新しいキーを押すと変わります。">既定は Mathpix Snip と同じです。ボタンを押してから、新しいキーを押すと変わります。</p>
       <div id="keymap"></div>
       <p><button type="button" id="keys-reset" data-i18n="すべて既定に戻す">すべて既定に戻す</button></p>
-    </fieldset>
-    <div class="dlg-actions"><button type="submit" class="primary" data-i18n="閉じる">閉じる</button></div>
+    </section>
+    <div class="dlg-actions"><button type="button" id="prefs-reset" data-i18n="このタブを既定に戻す">このタブを既定に戻す</button><span class="spacer"></span><button type="submit" class="primary" data-i18n="閉じる">閉じる</button></div>
   </form>
 </dialog>
 <div id="toast" role="status" aria-live="polite"></div>

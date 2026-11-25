@@ -15,6 +15,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+from ..osutil import no_window, venv_python
+
 import pymupdf
 
 from .base import RecognizerUnavailable
@@ -37,7 +39,7 @@ class PPOCRBackend:
 
     def __init__(self, cache_dir=None, python=None, lang=None, timeout_s: float = 300.0):
         self.cache_dir = Path(cache_dir or os.environ.get("PLO_PP_CACHE") or ROOT / "models" / "pp_cache")
-        self.python = Path(python or os.environ.get("PLO_PP_PYTHON") or ROOT / ".venv-pp" / "bin" / "python")
+        self.python = Path(python or os.environ.get("PLO_PP_PYTHON") or venv_python(ROOT / ".venv-pp"))
         self.lang = lang or os.environ.get("PLO_OCR_LANG") or "japan"
         self.timeout_s = timeout_s
         self.proc: subprocess.Popen | None = None
@@ -53,9 +55,9 @@ class PPOCRBackend:
         if self.proc and self.proc.poll() is None:
             return
         self._check()
-        cmd = [str(self.python), "-I", str(WORKER), "--cache-dir", str(self.cache_dir), "--lang", self.lang]
+        cmd = [str(self.python), "-I", "-X", "utf8", str(WORKER), "--cache-dir", str(self.cache_dir), "--lang", self.lang]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     text=True, bufsize=1)
+                                     text=True, encoding="utf-8", bufsize=1, **no_window())
         line = self._readline(max(self.timeout_s, 600))  # 初回はモデルの取得が入る
         if not line:
             self.close()

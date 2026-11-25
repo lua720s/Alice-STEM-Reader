@@ -360,25 +360,12 @@ async function copyText(text) {
   catch (e) { toast(T("コピーできませんでした（ブラウザの許可を確認）"), 4000); }
 }
 
-// ---- 設定: 数式の区切り記号（コピーと、PDFに埋め込む文章に反映する）
-const settings = { delim: LS.get("plo-delim", "paren"), single: LS.get("plo-delim-single", "0") === "1" };
-if (!["none", "paren", "dollar"].includes(settings.delim)) settings.delim = "paren";
-const DELIM_TOKEN = /\\[()\[\]]/g;
-function convertDelims(text, style) {  // 内部の \(…\)・\[…\] を、選んだ書き方に（delims.py と同じ規則）
-  if (style === "paren" || !text) return text;
-  if (style === "none") return text.replace(DELIM_TOKEN, "");
-  return text.replace(DELIM_TOKEN, (m) => (m === "\\[" || m === "\\]" ? "$$" : "$"));
-}
-function wrapSingle(latex, style) {  // 数式だけの枠に、区切りを付ける（1行は行内、複数行は表示数式）
-  const t = latex.replace(/^\n+|\n+$/g, "");
-  if (style === "none" || !t.trim()) return latex;
-  const multi = t.trim().includes("\n");
-  if (style === "paren") return multi ? "\\[" + t + "\\]" : "\\(" + t + "\\)";
-  return multi ? "$$" + t + "$$" : "$" + t + "$";
-}
-function outText(f, text) {  // コピーする文字列（文章の枠は、中の区切りを変える。数式だけの枠は、設定で区切りを付ける）
-  if (f && f.kind === "text") return convertDelims(text, settings.delim);
-  return settings.single ? wrapSingle(text, settings.delim) : text;
+// ---- 出力の形式・書き出しの設定（サーバーの app.json に保存。規則は format.js と outfmt.py で同じ）
+const PF = window.ploFormat;
+const prefs = { format: { ...PF.FORMAT_DEFAULTS }, export: {}, formatDefaults: { ...PF.FORMAT_DEFAULTS }, exportDefaults: {}, open_mode: "app", platform: "" };
+function convertDelims(text, style) { return PF.convertText(text, PF.fromLegacy(style)); }  // 決まった書き方（ダッシュボードの形式の行）
+function outText(f, text) {  // コピーする文字列（文章の枠は、中の区切りを変える。数式だけの枠は、設定の書き方に）
+  return PF.copyText(f && f.kind === "text" ? "text" : "math", text, prefs.format);
 }
 
 async function copyLatex() {
@@ -1202,7 +1189,7 @@ function wire() {
     if (!state.doc) { toast(T("PDFを選んでください。")); return; }
     $("export").disabled = true; toast(T("派生PDFを作成・検証しています…"), 60000);
     try {
-      const r = await api("POST", "/api/export", { mode: $("mode").value, only_confirmed: $("onlyconfirmed").checked, delim: settings.delim });
+      const r = await api("POST", "/api/export", { mode: $("mode").value, only_confirmed: $("onlyconfirmed").checked });
       const ex = r.excluded.filter((x) => x.reason && x.reason !== "user").map((x) => `${x.id}: ${x.reason}`);
       if (r.ok) toast(T("保存しました（埋め込み {e} 件、除外 {x} 件）\n{out}{extra}", { e: r.counts.embedded, x: r.counts.excluded, out: r.output, extra: ex.length ? "\n" + ex.join("\n") : "" }), 10000);
       else toast(T("保存しませんでした（終了コード {c}）\n{errs}{checks}", { c: r.exit_code, errs: r.errors.join("\n"), checks: r.failed_checks.length ? T("\n検証不合格: {c}", { c: r.failed_checks.join(", ") }) : "" }), 10000);
@@ -1279,22 +1266,98 @@ document.addEventListener("plo-lang", () => {
 });
 
 
-// 設定の画面
-function renderSettings() {
+// 設定の画面（タブ: 全般・出力の形式・書き出し・キーボードショートカット）
+const FORMAT_UI = [
+  ["inline", "行内数式の区切り", [["paren", "\\( … \\)"], ["dollar", "$ … $"], ["none", "付けない"]]],
+  ["display", "表示数式の区切り", [["bracket", "\\[ … \\]"], ["dollars", "$$ … $$"], ["equation", "\\begin{equation} … \\end{equation}"],
+    ["equation*", "\\begin{equation*} … \\end{equation*}"], ["none", "付けない"]]],
+  ["math_copy", "数式だけの結果をコピーするとき", [["raw", "区切りなし（LaTeX だけ）"], ["auto", "1行は行内、複数行は表示数式"], ["inline", "いつも行内数式"], ["display", "いつも表示数式"]]],
+  ["multiline", "複数行の数式", [["lines", "改行で並べる"], ["aligned", "aligned 環境にまとめる"], ["gathered", "gathered 環境にまとめる"]]],
+  ["text_lines", "文章の改行", [["keep", "そのまま"], ["join", "段落ごとに1行にまとめる"]]],
+];
+const EXPORT_UI = [
+  ["snip_format", "Snip の書き出しの既定の形式", [["md", "Markdown"], ["tex", "LaTeX"], ["tsv", "TSV（フラッシュカードのアプリ）"], ["csv", "CSV"], ["json", "JSON"]]],
+  ["md_math", "Markdown の数式", [["dollar", "$ … $・$$ … $$（Markdown の標準）"], ["output", "出力の形式の設定に従う"]]],
+  ["include_source", "出所（資料・ページ・日時）を入れる"],
+  ["include_notes", "メモを入れる"],
+  ["include_images", "切り取った画像も入れる（Markdown・LaTeX は ZIP にまとめる）"],
+  ["tex_document", "LaTeX は、そのままコンパイルできる文書にする（\\documentclass …）"],
+  ["-", "TSV・CSV（Anki・Quizlet などのフラッシュカード）"],
+  ["card_front", "1 列目（カードの表面）", [["note", "メモ（なければ出所）"], ["source", "出所"]]],
+  ["card_linebreak", "セルの中の改行", [["<br>", "<br>（HTML。Anki など）"], ["\\n", "\\n（文字）"], ["space", "空白"]]],
+  ["-", "資料の「認識した内容を書き出す」"],
+  ["doc_page_markers", "ページの区切りを入れる"],
+  ["doc_include_text", "文章の枠も入れる（外すと数式だけ）"],
+];
+function buildForm(box, schema, section) {
+  box.textContent = "";
+  for (const [key, label, opts] of schema) {
+    if (key === "-") { const d = document.createElement("div"); d.className = "ssep"; d.textContent = T(label); box.append(d); continue; }
+    const val = prefs[section][key];
+    if (!opts) {
+      const l = document.createElement("label"); l.className = "scheck";
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!val;
+      cb.addEventListener("change", () => savePref(section, key, cb.checked));
+      l.append(cb, document.createTextNode(T(label))); box.append(l); continue;
+    }
+    const id = `pref-${section}-${key}`;
+    const l = document.createElement("label"); l.className = "skey"; l.htmlFor = id; l.textContent = T(label);
+    const sel = document.createElement("select"); sel.id = id;
+    for (const [v, text] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = T(text); sel.append(o); }
+    sel.value = val;
+    sel.addEventListener("change", () => savePref(section, key, sel.value));
+    box.append(l, sel);
+  }
+}
+async function savePref(section, key, value) {
+  prefs[section] = { ...prefs[section], [key]: value };
+  renderSample();
+  try { applyPrefs(await api("POST", "/api/settings", { [section]: prefs[section] })); }
+  catch (e) { toast(T("設定を保存できませんでした: {m}", { m: e.message }), 4000); }
+}
+function renderSample() {
+  const f = prefs.format;
+  $("set-sample").textContent = [PF.copyText("math", "x^{2}+1", f), PF.copyText("math", "a=b\nc=d", f),
+    PF.copyText("text", "(1) 次の式 \\(x^{2}+1\\) を\n計算せよ。 \\[a=b\\]", f)].join("\n\n");
+}
+function applyPrefs(r) {
+  if (!r) return;
+  if (r.format) prefs.format = r.format;
+  if (r.export) prefs.export = r.export;
+  if (r.format_defaults) prefs.formatDefaults = r.format_defaults;
+  if (r.export_defaults) prefs.exportDefaults = r.export_defaults;
+  if (r.open_mode) prefs.open_mode = r.open_mode;
+  if (r.platform) prefs.platform = r.platform;
+}
+let settingsTab = "general";
+function setSettingsTab(t) {
+  settingsTab = t;
+  for (const b of document.querySelectorAll("#settings [data-stab]")) b.setAttribute("aria-selected", String(b.dataset.stab === t));
+  for (const sec of document.querySelectorAll("#settings [data-spane]")) sec.hidden = sec.dataset.spane !== t;
+  $("prefs-reset").hidden = t === "keys" || t === "general";
+}
+for (const b of document.querySelectorAll("#settings [data-stab]")) b.addEventListener("click", () => setSettingsTab(b.dataset.stab));
+function renderSettings(tab) {
   renderKeymap($("keymap"), true);
-  for (const r of document.querySelectorAll('#settings input[name="delim"]')) r.checked = r.value === settings.delim;
-  $("set-single").checked = settings.single;
-  $("set-single").disabled = settings.delim === "none";
-  const mixed = "(1) \\(x^{2}+1\\) \\[a=b\\]";
-  $("set-sample").textContent = convertDelims(mixed, settings.delim) + "\n" + wrapSingle("x^{2}+1", settings.single ? settings.delim : "none");
+  buildForm($("fmt-form"), FORMAT_UI, "format");
+  buildForm($("exp-form"), EXPORT_UI, "export");
+  for (const r of document.querySelectorAll('#settings input[name="open_mode"]')) r.checked = r.value === prefs.open_mode;
+  renderSample();
+  setSettingsTab(tab || settingsTab);
 }
+for (const r of document.querySelectorAll('#settings input[name="open_mode"]')) {
+  r.addEventListener("change", async () => {
+    try { applyPrefs(await api("POST", "/api/settings", { open_mode: r.value })); toast(T("次にアプリを開いたときから反映されます"), 2500); }
+    catch (e) { toast(T("設定を保存できませんでした: {m}", { m: e.message }), 4000); }
+  });
+}
+$("prefs-reset").addEventListener("click", async () => {
+  const section = settingsTab === "output" ? "format" : "export";
+  try { applyPrefs(await api("POST", "/api/settings", { [section]: section === "format" ? prefs.formatDefaults : prefs.exportDefaults })); renderSettings(); toast(T("既定に戻しました"), 1500); }
+  catch (e) { toast(T("設定を保存できませんでした: {m}", { m: e.message }), 4000); }
+});
 $("settings-btn").addEventListener("click", () => { renderSettings(); $("settings").showModal(); });
-for (const r of document.querySelectorAll('#settings input[name="delim"]')) {
-  r.addEventListener("change", () => { settings.delim = r.value; LS.set("plo-delim", r.value); renderSettings(); pushDelim(); });
-}
-$("set-single").addEventListener("change", () => { settings.single = $("set-single").checked; LS.set("plo-delim-single", settings.single ? "1" : "0"); renderSettings(); pushDelim(); });
-function pushDelim() { api("POST", "/api/settings", { delim: settings.delim, single: settings.single }).catch(() => {}); }  // メニューバーの Snip のコピーにも使う
-
+document.addEventListener("plo-lang", () => { if ($("settings").open) renderSettings(); });
 
 // ---- PDF・フォルダを開く（macOS の選択画面を、ビューアの中から出す。.app の起動時の選択画面は、これに統合した）
 async function pickOpen(kind) {
@@ -1331,7 +1394,7 @@ function snipSourceLabel(src) {
   return src.name || (src.type === "paste" ? T("貼り付けた画像") : T("画像"));
 }
 function snipCopyText(rec, text) {
-  return (rec.kind === "mixed" || rec.kind === "text") ? convertDelims(text, settings.delim) : (settings.single ? wrapSingle(text, settings.delim) : text);
+  return PF.copyText(rec.kind, text, prefs.format);
 }
 async function copySnip(rec, text, quiet = false) {
   const out = snipCopyText(rec, text);
@@ -1433,7 +1496,7 @@ async function snipScreen() {
   snipBusy(true);
   toast(T("画面の範囲をドラッグで選んでください（Esc で取り消し）"), 60000);
   try {
-    const r = await api("POST", "/api/snip/screen", { mode: snipMode(), copy: true, delim: settings.delim, single: settings.single });
+    const r = await api("POST", "/api/snip/screen", { mode: snipMode(), copy: true });  // 形式は、サーバーが設定から決める
     if (r.cancelled) { toast(T("取り消しました"), 1500); return; }
     addSnip(r);
     if (!r.latex) toast(T("読み取れませんでした: {m}", { m: r.error || "" }), 4000);
@@ -1517,16 +1580,19 @@ async function exportDocText(fmt) {
 }
 async function exportSnips(fmt) {
   try {
-    const name = await downloadPost("/api/snips/export", { fmt, delim: settings.delim }, `snips.${fmt}`);
+    const name = await downloadPost("/api/snips/export", { fmt }, `snips.${fmt || "md"}`);
     toast(T("書き出しました: {n}", { n: name }), 2500);
   } catch (e) { toast(T("失敗: {m}", { m: e.message }), 4000); }
 }
-$("snip-export").addEventListener("click", () => menuAt($("snip-export"), [
-  { label: T("Markdown（$…$、レポート・ノート向け）"), run: () => exportSnips("md") },
-  { label: T("LaTeX（論文の原稿向け）"), run: () => exportSnips("tex") },
-  { label: T("TSV（フラッシュカードのアプリに読み込む）"), run: () => exportSnips("tsv") },
-  { label: T("JSON（出所・エンジンの記録つき）"), run: () => exportSnips("json") },
-]));
+const EXPORT_KINDS = [["md", "Markdown（$…$、レポート・ノート向け）"], ["tex", "LaTeX（論文の原稿向け）"],
+  ["tsv", "TSV（フラッシュカードのアプリに読み込む）"], ["csv", "CSV（表計算・フラッシュカード）"], ["json", "JSON（出所・エンジンの記録つき）"]];
+function exportMenu(run, prefix) {  // 既定の形式（設定の「書き出し」）を先頭に。最後に書き出しの設定へ
+  const def = prefs.export.snip_format || "md";
+  const kinds = [...EXPORT_KINDS].sort((a, b) => (a[0] === def ? -1 : b[0] === def ? 1 : 0));
+  return [...kinds.map(([k, label]) => ({ label: `${prefix ? prefix + ": " : ""}${T(label)}${k === def ? "  ★" : ""}`, run: () => run(k) })),
+    "-", { label: T("書き出しの設定…"), run: () => { renderSettings("export"); $("settings").showModal(); } }];
+}
+$("snip-export").addEventListener("click", () => menuAt($("snip-export"), exportMenu((k) => exportSnips(k))));
 document.addEventListener("plo-lang", () => renderSnips());
 loadSnips();
 
@@ -1664,8 +1730,17 @@ function updateKeyHints() {  // ボタンの説明（title）に、いまの割�
 async function syncSettingsFromServer() {
   try {
     const r = await api("GET", "/api/settings");
+    applyPrefs(r);
     K.applyServer(r.global_hotkeys_custom);
     updateKeyHints();
+    // 以前の版で、このブラウザに保存していた区切りの設定を引き継ぐ（1 回だけ）
+    const legacy = LS.get("plo-delim", null);
+    if (legacy && LS.get("plo-fmt-migrated", "0") !== "1") {
+      LS.set("plo-fmt-migrated", "1");
+      if (JSON.stringify(r.format) === JSON.stringify(r.format_defaults)) {
+        applyPrefs(await api("POST", "/api/settings", { format: PF.fromLegacy(legacy, LS.get("plo-delim-single", "0") === "1") }));
+      }
+    }
   } catch (e) { /* 古いサーバー */ }
 }
 syncSettingsFromServer();

@@ -18,6 +18,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+from ..osutil import no_window, venv_python
+
 import numpy as np
 import pymupdf
 
@@ -39,7 +41,7 @@ class MFDDetector:
 
     def __init__(self, weights=None, python=None, device="cpu", timeout_s: float = 300.0):
         self.weights = Path(weights or os.environ.get("PLO_MFD_WEIGHTS") or ROOT / "models" / "mfd_yolo_v8" / "yolo_v8_ft.pt")
-        self.python = Path(python or os.environ.get("PLO_ML_PYTHON") or ROOT / ".venv-ml" / "bin" / "python")
+        self.python = Path(python or os.environ.get("PLO_ML_PYTHON") or venv_python(ROOT / ".venv-ml"))
         self.device = device
         self.timeout_s = timeout_s
         self.proc = None
@@ -53,10 +55,10 @@ class MFDDetector:
             raise RecognizerUnavailable(f"ML 用 Python がない: {self.python}（docs/MODELS.md の手順で導入）")
         if not self.weights.is_file():
             raise RecognizerUnavailable(f"数式検出の重みがない: {self.weights}（docs/MODELS.md の手順で取得）")
-        self.proc = subprocess.Popen([str(self.python), "-I", str(WORKER), "--weights", str(self.weights),
+        self.proc = subprocess.Popen([str(self.python), "-I", "-X", "utf8", str(WORKER), "--weights", str(self.weights),
                                       "--device", self.device],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     text=True, bufsize=1)
+                                     text=True, encoding="utf-8", bufsize=1, **no_window())
         line = self._readline(300)
         if not line:
             self.close()

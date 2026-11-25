@@ -1,11 +1,12 @@
-"""macOS の .app（Launchpad・Spotlight・Dock・Finder の「このアプリケーションで開く」）から使う起動部分。
+"""アプリ（macOS の .app、Windows のスタートメニュー、Linux の .desktop）から使う起動部分。
 
 - ビューアは1つだけ常駐させる（状態ファイルに接続情報を置く）。すでに動いていれば、そこへ資料を加えて開くだけ。
-  画面は、いつものブラウザで開く（http://127.0.0.1 のみ。外部には公開しない）。
+  画面は、アプリのウィンドウ（Chrome・Edge などの --app、または pywebview）か、いつものブラウザで開く
+  （設定の open_mode。http://127.0.0.1 のみ。外部には公開しない）。
 - 常駐するビューアは、操作が一定時間なければ自分で終了する。
 - 状態ファイルは自分だけが読める（トークンを含む）。
-- 起動時のフック: `~/Library/Application Support/Alice STEM Reader/hooks/on-launch` に実行できるファイルを置くと、
-  アプリを開くたびに裏で実行する（ほかのアプリを一緒に起動したいときなど。置かなければ何もしない）。
+- 起動時のフック: 設定の置き場所（osutil.config_dir）の `hooks/on-launch`（Windows は on-launch.cmd・.bat・.ps1・.exe）に
+  実行できるファイルを置くと、アプリを開くたびに裏で実行する（ほかのアプリを一緒に起動したいときなど。置かなければ何もしない）。
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from . import osutil
+
 APP_NAME = "Alice STEM Reader"
 SNIP_APP_NAME = "Alice STEM Snip"
 IDLE_EXIT_MIN = 120
@@ -30,9 +33,9 @@ _OLD_SUPPORT = "PDF LaTeX Overlay"  # 以前の版の置き場所（あれば、
 def support_dir() -> Path:
     if os.environ.get("PLO_APP_DIR"):
         return Path(os.environ["PLO_APP_DIR"])
-    base = Path.home() / "Library" / "Application Support"
-    new = base / APP_NAME
-    _migrate(base / _OLD_SUPPORT, new)
+    new = osutil.config_dir()
+    if osutil.IS_MAC:
+        _migrate(new.parent / _OLD_SUPPORT, new)
     return new
 
 
@@ -67,24 +70,37 @@ def hooks_dir() -> Path:
 
 
 def log_path() -> Path:
-    return Path(os.environ.get("PLO_APP_LOG") or Path.home() / "Library" / "Logs" / f"{APP_NAME}.log")
+    return Path(os.environ.get("PLO_APP_LOG") or osutil.log_file())
 
 
 def run_hook(name: str = "on-launch") -> bool:
     """利用者が置いたフック（実行できるファイル）があれば、裏で実行する。自分が持ち主で、他人が書き換えられないものだけ。"""
-    h = hooks_dir() / name
-    try:
-        st = h.stat()
-    except OSError:
-        return False
-    if not stat.S_ISREG(st.st_mode) or not os.access(h, os.X_OK) or st.st_uid != os.getuid() or st.st_mode & 0o022:
-        return False
+    if osutil.IS_WIN:
+        found = [hooks_dir() / f"{name}{ext}" for ext in (".cmd", ".bat", ".exe", ".ps1")]
+        h = next((x for x in found if x.is_file()), None)
+        if h is None:
+            return False
+        cmd = (["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(h)] if h.suffix == ".ps1"
+               else ["cmd", "/c", str(h)] if h.suffix in (".cmd", ".bat") else [str(h)])
+    else:
+        h = hooks_dir() / name
+        try:
+            st = h.stat()
+        except OSError:
+            return False
+        if not stat.S_ISREG(st.st_mode) or not os.access(h, os.X_OK) or st.st_uid != os.getuid() or st.st_mode & 0o022:
+            return False
+        cmd = [str(h)]
+    log_path().parent.mkdir(parents=True, exist_ok=True)
     with open(log_path(), "ab") as log:
-        subprocess.Popen([str(h)], stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, **osutil.detached())
     return True
 
 
-GLOBAL_HOTKEYS = {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+o", "latex": "ctrl+cmd+l", "markdown": "ctrl+cmd+n"}  # Mathpix Snip と同じ
+# 全体のショートカットの既定（Mathpix Snip と同じ: macOS は ⌃⌘、Windows・Linux は Ctrl+Alt）
+MAC_HOTKEYS = {"snip": "ctrl+cmd+m", "open": "ctrl+cmd+o", "latex": "ctrl+cmd+l", "markdown": "ctrl+cmd+n"}
+PC_HOTKEYS = {"snip": "ctrl+alt+m", "open": "ctrl+alt+o", "latex": "ctrl+alt+l", "markdown": "ctrl+alt+n"}
+GLOBAL_HOTKEYS = MAC_HOTKEYS if osutil.IS_MAC else PC_HOTKEYS
 _HOTKEY_RE = __import__("re").compile(r"^((ctrl|alt|shift|cmd)\+){1,4}([a-z0-9]|f([1-9]|1[0-9])|space)$")
 
 
@@ -203,7 +219,7 @@ def _spawn(roots: list[str], backend: str, wait_s: float) -> dict:
     cmd = [sys.executable, "-m", "pdf_latex_overlay", "viewer", *roots, "--no-open", "--backend", backend,
            "--state-file", str(sp), "--roots-file", str(roots_path()), "--idle-exit", str(IDLE_EXIT_MIN)]
     with open(lp, "ab") as log:
-        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, **osutil.detached())
     t0 = time.monotonic()
     while time.monotonic() - t0 < wait_s:
         st = running_state()
@@ -214,7 +230,7 @@ def _spawn(roots: list[str], backend: str, wait_s: float) -> dict:
 
 
 def app_open(files: list[str] | None = None, folder: str | None = None, backend: str = "unimernet",
-             wait_s: float = 60.0, opener=webbrowser.open, view: str | None = None, new: str | None = None) -> dict:
+             wait_s: float = 60.0, opener=None, view: str | None = None, new: str | None = None) -> dict:
     """PDF（複数可）またはフォルダをビューアで開く。動いていれば再利用する。"""
     files = [str(Path(f).expanduser()) for f in (files or [])]
     from .docformats import is_supported
@@ -244,7 +260,7 @@ def app_open(files: list[str] | None = None, folder: str | None = None, backend:
     cmd = {k: v for k, v in (("view", "snips" if new else view), ("new", new)) if v}
     # すでに画面が開いている（直前まで通信があった）ときは、新しいタブを開かない。画面は、開いた資料と、送った指示に追従する
     if fresh or st.get("idle_s", 999) > 8:
-        opener(st["url"] + "".join(f"&{k}={v}" for k, v in cmd.items()))
+        (opener or open_ui)(st["url"] + "".join(f"&{k}={v}" for k, v in cmd.items()))
     elif cmd:
         _call(st, "POST", "/api/ui/push", cmd)
     return {"url": st["url"], "fresh": fresh, "opened": opened, "pid": st["pid"]}
@@ -267,7 +283,7 @@ def app_snip(mode: str = "auto", backend: str = "unimernet", wait_s: float = 60.
 
     st = running_state() or _spawn([], backend, wait_s)
     cfg = read_config()
-    body = {"mode": mode, "copy": True, "delim": cfg.get("delim", "paren"), "single": bool(cfg.get("single", False))}
+    body = {"mode": mode, "copy": True}  # 出力の形式は、サーバーが設定（app.json の format）から決める
     r = _call(st, "POST", "/api/snip/screen", body, timeout=600.0)
     if notify and not r.get("cancelled"):
         if r.get("latex"):
@@ -277,17 +293,42 @@ def app_snip(mode: str = "auto", backend: str = "unimernet", wait_s: float = 60.
     return r
 
 
+def open_ui(url: str) -> str:
+    """画面を開く。設定の open_mode が app（既定）なら、アプリのウィンドウ（なければブラウザ）。使った方法を返す。"""
+    mode = read_config().get("open_mode", "app")
+    if mode == "app":
+        how = osutil.open_app_window(url, support_dir() / "window-profile")
+        if how:
+            return how
+    webbrowser.open(url)
+    return "browser"
+
+
+def agent_pid_path() -> Path:
+    return support_dir() / "hotkeys.pid"
+
+
 def ensure_agent() -> bool:
-    """メニューバーの Snip アプリ（全体のショートカット）が動いていなければ、裏で起動する（Snip はしない）。"""
-    if sys.platform != "darwin":
-        return False
-    app = read_config().get("snip_app")
-    exe = Path(app) / "Contents" / "MacOS" / "AliceSTEMSnip" if app else None
-    if not exe or not exe.is_file():
-        return False  # アプレット版（ショートカットなし）か、まだ作っていない
-    r = subprocess.run(["/usr/bin/pgrep", "-f", str(exe)], capture_output=True)
-    if r.returncode == 0:
+    """全体のショートカットを受け付ける常駐（macOS: メニューバーの Snip アプリ、Windows・Linux: hotkey-agent）を、動いていなければ裏で起動する。"""
+    if osutil.IS_MAC:
+        app = read_config().get("snip_app")
+        exe = Path(app) / "Contents" / "MacOS" / "AliceSTEMSnip" if app else None
+        if not exe or not exe.is_file():
+            return False  # アプレット版（ショートカットなし）か、まだ作っていない
+        r = subprocess.run(["/usr/bin/pgrep", "-f", str(exe)], capture_output=True)
+        if r.returncode == 0:
+            return True
+        subprocess.Popen(["/usr/bin/open", "-g", "-j", str(app), "--args", "--background"], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return True
-    subprocess.Popen(["/usr/bin/open", "-g", "-j", str(app), "--args", "--background"], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        pid = int(agent_pid_path().read_text(encoding="utf-8").strip() or "0")
+    except (OSError, ValueError):
+        pid = 0
+    if pid and osutil.pid_alive(pid):
+        return True
+    log_path().parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path(), "ab") as log:
+        subprocess.Popen([str(osutil.gui_python()), "-m", "pdf_latex_overlay", "hotkey-agent"], stdin=subprocess.DEVNULL,
+                         stdout=log, stderr=log, **osutil.detached())
     return True

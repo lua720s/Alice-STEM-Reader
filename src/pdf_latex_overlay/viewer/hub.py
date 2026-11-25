@@ -208,8 +208,15 @@ class Hub:
         """macOS の選択画面（Finder の「開く」）を出して、選んだ PDF・フォルダを加える。ビューアの中から開けるようにするため。"""
         if kind not in ("pdf", "folder"):
             raise SessionError("kind が不正（pdf か folder）")
-        if sys.platform != "darwin":
-            raise SessionError("この環境では、選択画面を出せない（macOS のみ）", 501)
+        if sys.platform != "darwin":  # Windows・Linux: OS の選択画面（zenity・kdialog・tkinter）
+            from ..osutil import OSFeatureError, pick_paths
+
+            try:
+                got = pick_paths("files" if kind == "pdf" else "folder",
+                                 "Choose documents (PDF, EPUB, DjVu, images, Markdown, LaTeX…)" if kind == "pdf" else "Choose a folder")
+            except (OSFeatureError, OSError, subprocess.SubprocessError) as e:
+                raise SessionError(f"選択画面を出せなかった: {e}", 501)
+            return self._picked(kind, got)
         if kind == "pdf":
             script = ('tell current application to activate\n'
                       'set fs to choose file with prompt "資料を選んでください（PDF・EPUB・DjVu・画像・Markdown・LaTeX など。複数可）" with multiple selections allowed\n'
@@ -222,7 +229,10 @@ class Hub:
         except (OSError, subprocess.TimeoutExpired):
             raise SessionError("選択画面を出せなかった", 500)
         paths = [ln for ln in r.stdout.splitlines() if ln.strip()]
-        if r.returncode != 0 or not paths:
+        return self._picked(kind, paths if r.returncode == 0 else None)
+
+    def _picked(self, kind: str, paths) -> dict:
+        if not paths:
             return {"cancelled": True}  # キャンセル
         if kind == "folder":
             return {"added": 1, "root": self.add_root(paths[0])}
@@ -898,8 +908,8 @@ class Hub:
         return self.snips().add(png, res, src, self._engine_info(), {"mode": mode})
 
     def snip_screen(self, mode: str = "auto", copy: bool = True, delim: str = "paren", single: bool = False,
-                    capture=None) -> dict:
-        """画面の範囲を選んで読み、結果をクリップボードへ（macOS）。取り消したら {"cancelled": True}。"""
+                    capture=None, fmt: dict | None = None) -> dict:
+        """画面の範囲を選んで読み、結果をクリップボードへ。取り消したら {"cancelled": True}。fmt: 出力の形式の設定。"""
         from ..snip import SnipError, capture_screen, copy_to_clipboard, format_for_copy
 
         self._snip_models()  # エンジンがなければ、切り取る前に知らせる
@@ -914,7 +924,7 @@ class Hub:
             raise SessionError(str(e), e.status) from e
         res = self._run_snip(png, mode)
         rec = self.snips().add(png, res, {"type": "screen"}, self._engine_info(), {"mode": mode})
-        rec = dict(rec, copied=bool(copy and rec.get("latex") and copy_to_clipboard(format_for_copy(rec, delim, single))))
+        rec = dict(rec, copied=bool(copy and rec.get("latex") and copy_to_clipboard(format_for_copy(rec, fmt if fmt is not None else delim, single))))
         return rec
 
     def snip_region(self, page, view_rect, mode: str = "auto") -> dict:

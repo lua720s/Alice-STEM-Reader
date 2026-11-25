@@ -77,6 +77,7 @@ def test_http_ping_addfiles_quit(fx, tmp_path):
         h.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX のファイル権限")
 def test_serve_writes_private_state_file_and_exits_when_idle(fx, tmp_path, monkeypatch):
     monkeypatch.setenv("PLO_LIBRARY", str(tmp_path / "lib"))
     a = _pdf(fx, tmp_path / "in", "a.pdf")
@@ -96,6 +97,7 @@ def test_serve_writes_private_state_file_and_exits_when_idle(fx, tmp_path, monke
     assert not state.exists()  # 状態ファイルも消えた
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX のファイル権限")
 def test_app_open_reuses_the_running_viewer_and_stops(fx, tmp_path, monkeypatch):
     monkeypatch.setenv("PLO_APP_DIR", str(tmp_path / "support"))
     monkeypatch.setenv("PLO_APP_LOG", str(tmp_path / "app.log"))
@@ -200,6 +202,7 @@ def test_opening_does_not_auto_recognize_by_default():
     assert '"auto": False' in inspect.getsource(applaunch.app_open)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX のファイル権限")
 def test_launch_hook_runs_only_safe_user_files(tmp_path, monkeypatch):
     import os
 
